@@ -1,0 +1,38 @@
+# Local documentation
+/docs/
+
+# Local Python / tools
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.env
+.env.*
+!.env.example
+
+# Local generated data and secrets
+*.sqlite3
+*.db
+*.pem
+*.key
+credentials.json
+secrets.yaml
+options.json
+*.tfstate
+*.tfstate.*
+.terraform/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+
+# Packaging
+dist/
+build/
+*.egg-info/
