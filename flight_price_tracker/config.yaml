@@ -1,0 +1,27 @@
+name: Flight Price Tracker
+slug: flight_price_tracker
+description: Read flight monitoring checks from S3 through Home Assistant Ingress
+version: 0.1.0
+url: https://github.com/Krbielec/flight-price-tracker-ha
+image: ghcr.io/krbielec/flight-price-tracker
+startup: application
+boot: auto
+init: false
+ingress: true
+ingress_port: 8099
+panel_title: Flight Price Tracker
+panel_icon: mdi:airplane-search
+panel_admin: true
+arch:
+  - amd64
+  - aarch64
+options:
+  aws_region: eu-central-1
+  s3_bucket: ""
+  aws_access_key_id: ""
+  aws_secret_access_key: ""
+schema:
+  aws_region: str
+  s3_bucket: str
+  aws_access_key_id: password
+  aws_secret_access_key: password
