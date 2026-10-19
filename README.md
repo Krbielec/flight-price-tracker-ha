@@ -5,7 +5,7 @@ checks stored in S3. Daily Ryanair fare collection runs separately in AWS.
 
 ## Current scope
 
-Version 0.5.0 adds one dynamic Lovelace card: one chart panel per check, with
+Version 0.5.1 adds one dynamic Lovelace card: one chart panel per check, with
 separate series per flight departure date. It refreshes the check list automatically
 and reads observations through the existing response-returning HA services, including
 for non-admin viewers. The Ingress panel supports creating checks, enabling/disabling,
@@ -321,7 +321,7 @@ The Lovelace card below uses these services without Ingress access.
 
 ## Dynamic Lovelace card
 
-After updating to 0.5.0 and starting the add-on, the managed card assets are copied
+After updating to 0.5.1 and starting the add-on, the managed card assets are copied
 into `/config/www/flight-price-tracker/`. Existing unmanaged directories or symlinks
 are refused; other files in `www` are preserved. Nothing edits your dashboards or
 registers resources automatically. If this is the first time HA's `www` directory
@@ -331,7 +331,7 @@ Enable the HA integration as described above. In **Settings → Dashboards → R
 (enable Advanced Mode if necessary), add this **JavaScript module** once:
 
 ```text
-/local/flight-price-tracker/flight-price-tracker-card.js?v=0.5.0
+/local/flight-price-tracker/flight-price-tracker-card.js?v=0.5.1
 ```
 
 On the existing tablet dashboard, add one manual card:
@@ -353,9 +353,16 @@ or the browser tab is hidden and resumes on return. Unrelated HA state updates d
 not trigger S3 reads. Each card keeps only its own in-memory cache; a page reload
 starts a full read. A single card per dashboard is recommended.
 
-X is the observation date in Europe/Warsaw; Y is the price in the check's currency.
+X is the observation date in Europe/Warsaw, with one label for every observed day.
+Longer histories scroll horizontally to keep all date labels readable; missing days
+retain their real spacing. Y fits the visible available fares with padding and
+rounded bounds, rather than always starting at zero (190–550 gives 160–580).
+Hiding a series recalculates the scale; constant/zero fares and no available fares
+also have a non-degenerate scale. Y is the price in the check's currency.
 Each flight departure date is a separate colored series. Legend buttons toggle
-series locally. Tap, hover or focus a point to see exact local departure/arrival
+series locally and display the departure date plus local HH:MM from that series'
+newest observation. If the newest observation has no departure time, the legend
+shows an em dash rather than an older time. Full point details remain historical. Tap, hover or focus a point to see exact local departure/arrival
 strings (including next-day arrival), fare/status and UTC collection timestamp.
 Unavailable/sold-out prices are hollow status markers at the baseline, **not zero
 fares**, and interrupt the line. Days without observations also interrupt lines.

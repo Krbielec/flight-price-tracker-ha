@@ -1,6 +1,6 @@
 # Flight Price Tracker — first test in Home Assistant
 
-Version 0.5.0 displays S3 checks and lets administrators add, enable or disable
+Version 0.5.1 displays S3 checks and lets administrators add, enable or disable
 them. It also provides read-only HA services for observation history. Editing existing
 check definitions remains a later step. A dynamic Lovelace chart card is included.
 
@@ -115,14 +115,14 @@ No AWS credentials belong in dashboard configuration. The native Lovelace card w
 
 ## Add the dynamic chart card
 
-Start version 0.5.0 to install `/config/www/flight-price-tracker/`. If HA's `www`
+Start version 0.5.1 to install `/config/www/flight-price-tracker/`. If HA's `www`
 directory was just created for the first time, restart HA Core once to enable
 `/local/` files. The integration above must already be enabled.
 
 In **Settings → Dashboards → Resources**, add a **JavaScript module**:
 
 ```text
-/local/flight-price-tracker/flight-price-tracker-card.js?v=0.5.0
+/local/flight-price-tracker/flight-price-tracker-card.js?v=0.5.1
 ```
 
 Add one manual card to the existing dashboard:
@@ -141,7 +141,12 @@ no observations show an empty-history message. A viewer can hide disabled checks
 locally. No viewer operation changes S3 configuration.
 
 Tap a point for fare, local departure and arrival times, including next-day dates.
-Legend buttons hide/show individual departure-date series. Missing fares break
+Legend buttons hide/show individual departure-date series and display the local
+departure time from the latest observation, for example `2027-02-14 08:35`.
+An unknown time in the latest observation is shown as an em dash.
+The Y axis fits visible available prices with padding instead of always starting
+at zero. For example, prices 190–550 produce bounds 160–580. Each observation day
+has its own X label; longer histories scroll horizontally to avoid overlapping dates. Missing fares break
 lines and appear as hollow status markers, not zero prices. The X axis is the
 Warsaw observation date. Multiple daily reads use the latest run per departure date.
 

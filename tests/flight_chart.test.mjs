@@ -106,3 +106,48 @@ test('point details preserve local timestamps, next-day arrival and currency; ma
   assert.doesNotMatch(html, /<script>|<img/);
   assert.match(html, /&lt;img/);
 });
+
+test('Y scale fits visible fares with padding instead of forcing a zero baseline', async () => {
+  const {priceScale} = await import('../flight_price_tracker/www/flight-chart.mjs');
+  const scale = priceScale([190, 550]);
+  assert.equal(scale.minimum, 160);
+  assert.equal(scale.maximum, 580);
+  for (const values of [[196], [196, 196], [0], [0, 550], []]) {
+    const bounds = priceScale(values);
+    assert.ok(Number.isFinite(bounds.minimum) && Number.isFinite(bounds.maximum));
+    assert.ok(bounds.maximum > bounds.minimum && bounds.minimum >= 0);
+    assert.ok(values.every((v) => v >= bounds.minimum && v <= bounds.maximum));
+  }
+  const rows = [fare({price: 190}), fare({price: 550, departureDate: '2027-02-20'}),
+    fare({price: null, unavailable: true, departureDate: '2027-02-21'})];
+  const html = chartMarkup(check, rows);
+  assert.match(html, /text-anchor="end">160<\/text>/);
+  assert.match(html, /text-anchor="end">580<\/text>/);
+  const hidden = chartMarkup(check, rows, new Set(['2027-02-20']));
+  assert.doesNotMatch(hidden, /text-anchor="end">580<\/text>/);
+  assert.doesNotMatch(html, /NaN|Infinity/);
+});
+
+test('X axis labels every actual observation day once, retaining real gaps and readable width', () => {
+  const rows = ['2026-10-19', '2026-10-20', '2026-10-22', '2026-11-20'].flatMap((date) => [
+    fare({checkedDate: date}), fare({checkedDate: date, departureDate: '2027-02-20'}),
+  ]);
+  const html = chartMarkup(check, rows);
+  const dates = [...html.matchAll(/data-observation-date="([^"]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(dates, ['2026-10-19', '2026-10-20', '2026-10-22', '2026-11-20']);
+  assert.doesNotMatch(html, /data-observation-date="2026-10-21"/);
+  const minimumWidth = Number(html.match(/min-width:(\d+)px/)[1]);
+  assert.ok(minimumWidth >= 2000);
+  assert.match(html, /rotate\(-55/);
+});
+
+test('legend shows latest departure wall-clock time without converting timezone or retaining a stale time', async () => {
+  const {legendLabel} = await import('../flight_price_tracker/www/flight-chart.mjs');
+  const old = fare({departureAt: '2027-02-19T08:35:00'});
+  const latest = fare({checkedAt: '2026-10-20T10:00:00+00:00', checkedDate: '2026-10-20', departureAt: '2027-02-19T09:40:00'});
+  assert.equal(legendLabel('2027-02-19', [latest, old]), '2027-02-19 09:40');
+  assert.match(chartMarkup(check, [old]), />2027-02-19 08:35<\/button>/);
+  assert.equal(legendLabel('2027-02-19', [old, {...latest, departureAt: null, unavailable: true}]), '2027-02-19 —');
+  const tied = {...latest, departureAt: '2027-02-19T10:50:00'};
+  assert.equal(legendLabel('2027-02-19', [latest, tied]), legendLabel('2027-02-19', [tied, latest]));
+});

@@ -1,4 +1,4 @@
-import {TrackerModel, chartMarkup, escapeHTML, pointDetail} from './flight-chart.mjs?v=0.5.0';
+import {TrackerModel, chartMarkup, escapeHTML, pointDetail} from './flight-chart.mjs?v=0.5.1';
 
 class FlightPriceTrackerCard extends HTMLElement {
   constructor() {
@@ -88,9 +88,9 @@ class FlightPriceTrackerCard extends HTMLElement {
       const svg = event.target.closest?.('svg');
       if (svg) {
         const rect = svg.getBoundingClientRect();
-        const x = (event.clientX - rect.left) / rect.width * 700;
-        const y = (event.clientY - rect.top) / rect.height * 285;
-        if (y < 20 || y > 235 || x < 55 || x > 675) return;
+        const x = (event.clientX - rect.left) / rect.width * svg.viewBox.baseVal.width;
+        const y = (event.clientY - rect.top) / rect.height * svg.viewBox.baseVal.height;
+        if (y < 10 || y > 245 || x < 30 || x > svg.viewBox.baseVal.width - 5) return;
         let nearest, distance = Infinity;
         for (const point of svg.querySelectorAll('[data-point]')) {
           const next = Math.hypot(point.cx.baseVal.value - x, point.cy.baseVal.value - y);
@@ -152,6 +152,7 @@ class FlightPriceTrackerCard extends HTMLElement {
       p { overflow-wrap:anywhere; } .muted, .detail { color:var(--secondary-text-color); font-size:.85em; }
       .detail { min-height:3em; line-height:1.5; } [role=alert] { color:var(--error-color, #b3261e); }
       .plot { overflow-x:auto; } svg { display:block; width:100%; min-width:480px; }
+      svg .axis-day { font-size:16px; }
       svg text { fill:var(--secondary-text-color, #60656f); font-size:18px; } .grid { stroke:var(--divider-color, #aaa); stroke-width:1; }
       circle { cursor:pointer; } .legend { display:flex; flex-wrap:wrap; gap:6px; max-height:150px; overflow:auto; }
       .series { font-size:.8em; border-width:2px; } .series[aria-pressed=false] { opacity:.5; text-decoration:line-through; }

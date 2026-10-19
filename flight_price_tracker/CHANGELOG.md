@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.1
+
+- Fit the Y axis to visible available fares with padded bounds, including constant
+  and zero fares, instead of forcing a zero baseline.
+- Label each observation day on X, preserving gaps and using horizontal scrolling
+  for longer histories. Keep touch hit testing accurate after scrolling.
+- Show local departure HH:MM from the newest observation in each legend button;
+  retain full historical times in point details.
+
 ## 0.5.0
 
 - Add one native Lovelace card with dynamic chart panels for all checks; new checks

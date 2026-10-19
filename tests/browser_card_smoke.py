@@ -49,7 +49,7 @@ async def main():
             const row = {checkedAt: '2026-10-19T10:00:00+00:00', checkedDate: '2026-10-19',
               departureDate: '2027-02-19', departureAt: '2027-02-19T23:45:00', arrivalAt: '2027-02-20T02:15:00',
               price: 196, currency: 'PLN', soldOut: false, unavailable: false};
-            return {response: {checkId: call.service_data.check_id, observations: [row,
+            return {response: {checkId: call.service_data.check_id, observations: window.historyRows || [row,
               {...row, departureDate: '2027-02-20', price: null, unavailable: true}], nextCursor: null}};
           }};
           await import('/flight-price-tracker-card.js');
@@ -100,6 +100,29 @@ async def main():
         assert await page.locator('flight-price-tracker-card section').count() == 6
         await page.evaluate('window.failList = false; window.failCheck = null; window.nextPoll()')
         await page.wait_for_function('!card._model.listError && card._model.errors.size === 0 && !card._busy')
+        # Multiple observation dates: dynamic Y bounds, one tick per day, latest time in legend.
+        await page.evaluate('''() => {
+          window.historyRows = ['2026-10-19', '2026-10-20', '2026-10-22', '2026-11-20'].map((date, i) => ({
+            checkedAt: `${date}T11:00:00+00:00`, checkedDate: date, departureDate: '2027-02-19',
+            departureAt: '2027-02-19T08:35:00', arrivalAt: '2027-02-19T12:15:00',
+            price: [190, 550, 210, 240][i], currency: 'PLN', soldOut: false, unavailable: false,
+          }));
+          window.nextPoll();
+        }''')
+        await page.wait_for_function("card.shadowRoot.querySelectorAll('section')[0].querySelectorAll('.axis-day').length === 4 && !card._busy")
+        panel = page.locator('flight-price-tracker-card section').first
+        assert await panel.locator('[data-series="2027-02-19"]').inner_text() == '2027-02-19 08:35'
+        assert '160' in await panel.locator('svg').text_content()
+        assert '580' in await panel.locator('svg').text_content()
+        assert await panel.locator('.plot').evaluate('(plot) => plot.scrollWidth > plot.clientWidth')
+        assert await page.evaluate('document.documentElement.scrollWidth <= 390')
+        # Hit testing also works after the longer chart has scrolled horizontally.
+        latest_point = panel.locator('circle[data-point="4"]')
+        await latest_point.scroll_into_view_if_needed()
+        box = await latest_point.bounding_box()
+        await page.mouse.click(box['x'] + box['width'] / 2 + 8, box['y'] + box['height'] / 2)
+        assert '240.00 PLN' in await panel.locator('.detail').inner_text()
+        await panel.screenshot(path='/tmp/flight-price-tracker-card-axes.png')
         await page.evaluate('card.remove()')
         assert await page.evaluate('card._timer === null')
         assert not failures, failures
