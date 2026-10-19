@@ -1,4 +1,4 @@
-"""Bounded S3 reads and conditional enabled-state updates of one config object."""
+"""Bounded reads, check creation and conditional updates of one S3 config object."""
 
 import asyncio
 import re
@@ -7,7 +7,7 @@ import boto3
 from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
 
-from .contracts import decode_json, encode_json, validate_checks
+from .contracts import ContractError, decode_json, encode_json, validate_checks, validate_new_check
 from .settings import Settings
 
 CHECKS_KEY = "config/checks.json"
@@ -60,16 +60,39 @@ class S3Checks:
             raise ChecksReadError("invalid_request", "A boolean enabled and a single strong ETag are required.", 400)
         return await asyncio.to_thread(self._set_enabled, check_id, enabled, expected_etag)
 
-    def _set_enabled(self, check_id: str, enabled: bool, expected_etag: str) -> tuple[dict, str]:
+    def _current(self, expected_etag: str) -> dict:
         document, etag = self._snapshot()
         if not valid_etag(etag):
             raise ChecksReadError("invalid_config", "S3 configuration has no valid ETag.")
         if etag != expected_etag:
             raise ChecksReadError("conflict", "Configuration changed. Refresh before trying again.", 409)
+        return document
+
+    async def create(self, payload: dict, expected_etag: str) -> tuple[dict, str]:
+        if not valid_etag(expected_etag):
+            raise ChecksReadError("invalid_request", "A single strong ETag is required.", 400)
+        try:
+            check = validate_new_check(payload)
+        except ContractError as exc:
+            raise ChecksReadError("invalid_request", str(exc), 400) from None
+        return await asyncio.to_thread(self._create, check, expected_etag)
+
+    def _create(self, check: dict, expected_etag: str) -> tuple[dict, str]:
+        document = self._current(expected_etag)
+        if any(item["id"] == check["id"] for item in document["checks"]):
+            raise ChecksReadError("duplicate_id", "A check with this ID already exists. Choose another ID.", 409)
+        document["checks"].append(check)
+        return check, self._put(document, expected_etag)
+
+    def _set_enabled(self, check_id: str, enabled: bool, expected_etag: str) -> tuple[dict, str]:
+        document = self._current(expected_etag)
         check = next((item for item in document["checks"] if item["id"] == check_id), None)
         if check is None:
             raise ChecksReadError("check_not_found", "Check was not found.", 404)
         check["enabled"] = enabled
+        return check, self._put(document, expected_etag)
+
+    def _put(self, document: dict, etag: str) -> str:
         try:
             raw = encode_json(document).encode("utf-8")
         except (ValueError, UnicodeError, RecursionError):
@@ -93,7 +116,7 @@ class S3Checks:
         new_etag = result.get("ETag")
         if not valid_etag(new_etag):
             raise ChecksReadError("s3_write_failed", "S3 update could not be confirmed. Refresh before trying again.", 503)
-        return check, new_etag
+        return new_etag
 
     def _snapshot(self) -> tuple[dict, str | None]:
         try:

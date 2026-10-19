@@ -37,3 +37,14 @@ def document():
             "currency": "PLN", "enabled": True,
         }],
     }
+
+
+@pytest.fixture
+def new_check():
+    from datetime import timedelta
+    from app.contracts import current_date
+    start = current_date() + timedelta(days=30)
+    return {
+        "id": "new-check", "origin": "AAA", "destination": "CCC", "currency": "PLN",
+        "departureDateFrom": start.isoformat(), "departureDateTo": (start + timedelta(days=6)).isoformat(),
+    }

@@ -46,7 +46,7 @@ def create_app(store: S3Checks, authorizer: HAAdminAuthorizer | None = None) -> 
         payload, etag = await store.snapshot()
         return web.json_response(payload, dumps=encode_json, headers={"Cache-Control": "no-store", "ETag": etag})
 
-    async def set_enabled(request):
+    async def mutation_body(request):
         # Requiring JSON and a non-simple If-Match header prevents cross-origin
         # form submissions. No CORS support is exposed by this application.
         if request.content_type != "application/json":
@@ -58,6 +58,16 @@ def create_app(store: S3Checks, authorizer: HAAdminAuthorizer | None = None) -> 
             body = await request.json(loads=decode_json)
         except (ValueError, UnicodeError, RecursionError):
             raise ChecksReadError("invalid_request", "Expected a valid JSON object.", 400) from None
+        return body, etag
+
+    async def create_check(request):
+        body, etag = await mutation_body(request)
+        check, new_etag = await store.create(body, etag)
+        return web.json_response(check, status=201, dumps=encode_json,
+                                 headers={"Cache-Control": "no-store", "ETag": new_etag})
+
+    async def set_enabled(request):
+        body, etag = await mutation_body(request)
         if not isinstance(body, dict) or set(body) != {"enabled"} or type(body["enabled"]) is not bool:
             raise ChecksReadError("invalid_request", "Expected only a boolean enabled field.", 400)
         check, new_etag = await store.set_enabled(request.match_info["check_id"], body["enabled"], etag)
@@ -68,6 +78,7 @@ def create_app(store: S3Checks, authorizer: HAAdminAuthorizer | None = None) -> 
 
     app.router.add_get("/", index)
     app.router.add_get("/api/checks", checks)
+    app.router.add_post("/api/checks", create_check)
     app.router.add_patch("/api/checks/{check_id}/enabled", set_enabled)
     app.on_cleanup.append(cleanup)
     return app

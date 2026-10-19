@@ -1,7 +1,7 @@
 # Flight Price Tracker — first test in Home Assistant
 
-Version 0.2.0 displays S3 checks and lets administrators enable or disable them.
-It cannot create/edit check definitions or display price charts.
+Version 0.3.0 displays S3 checks and lets administrators add, enable or disable
+them. Editing existing check definitions and displaying charts are later steps.
 
 1. Add `https://github.com/Krbielec/flight-price-tracker-ha` under **Settings →
    Apps → App store → ⋮ → Repositories** (called **Add-ons / Add-on store** in
@@ -22,7 +22,7 @@ The IAM identity needs `s3:GetObject` and `s3:PutObject` only for the existing
 bucket's `config/checks.json`. It does not modify observations or delete objects.
 It exposes no host HTTP port; open it through Home Assistant Ingress.
 
-After upgrading from 0.1.0, restart the add-on and reopen its panel so Ingress
+When upgrading from 0.1.0, restart the add-on and reopen its panel so Ingress
 provides your user identity. The add-on now requests internal HA API access to
 verify administrator roles, using the server-only Supervisor token. Missing user
 identity denies access; unavailable role checks deny access with a service error.
@@ -33,6 +33,23 @@ scheduled collection and preserves all history; it does not cancel a running job
 Only perform this test on a check you intend to change. In two tabs, make a change
 in the first and try a change from the stale second tab: it should report a
 conflict and require **Refresh**, rather than overwrite the first change.
+
+To test creation, open **Add check** and use a unique lowercase ID, distinct
+three-letter airport codes, valid future departure dates, and currency (PLN is the
+tested default). You can uncheck **Enabled** to save a check without scheduling
+future collection for it. Add it, refresh, and verify the new row and all previous
+rows remain. Adding a check does not run the collector immediately.
+
+New dates may range from today through 730 days ahead in Europe/Warsaw. A check
+can cover at most 366 departure dates, inclusive. Historical checks remain readable
+and can still be enabled or disabled. New IDs allow lowercase letters, digits and
+single hyphens between segments, with a maximum length of 128 characters.
+
+Reusing an ID must show a conflict instead of editing or replacing its existing
+check. Test concurrent creation with two tabs: save in one, then submit the stale
+form in the other. It must require a refresh. Failed saves retain your input; if a
+response was lost, inspect the refreshed table before retrying. There is no delete
+operation: test checks remain in S3 and can be disabled later.
 
 If installation reports an image error, confirm the GitHub Actions workflow has
 completed successfully and the `flight-price-tracker` GHCR package is public.

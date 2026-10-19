@@ -1,9 +1,11 @@
 """Validate the version-one read contract without dropping compatible fields."""
 
-from datetime import date
-import simplejson as json
+from datetime import date, datetime, timedelta
 import re
 from typing import Any
+from zoneinfo import ZoneInfo
+
+import simplejson as json
 
 
 class ContractError(ValueError):
@@ -76,3 +78,33 @@ def encode_json(document):
     """Preserve numeric precision in compatible fields while merging enabled."""
     return json.dumps(document, use_decimal=True, ensure_ascii=True,
                       allow_nan=False, separators=(",", ":"))
+
+
+MAX_NEW_CHECK_DAYS_AHEAD = 730
+MAX_NEW_CHECK_RANGE_DAYS = 366
+NEW_CHECK_FIELDS = {
+    "id", "origin", "destination", "departureDateFrom", "departureDateTo", "currency", "enabled",
+}
+
+
+def current_date() -> date:
+    return datetime.now(ZoneInfo("Europe/Warsaw")).date()
+
+
+def validate_new_check(payload: Any, *, today: date | None = None) -> dict:
+    """Stricter input rules for new checks; historical read rules stay unchanged."""
+    if not isinstance(payload, dict) or set(payload) - NEW_CHECK_FIELDS:
+        raise ContractError("Expected a check object containing only supported fields.")
+    check = {**payload}
+    check.setdefault("enabled", True)
+    validate_checks({"schemaVersion": 1, "checks": [check]})
+    if len(check["id"]) > 128 or not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", check["id"]):
+        raise ContractError("ID must be a lowercase slug of at most 128 letters, digits and hyphens.")
+    today = today if today is not None else current_date()
+    start = date.fromisoformat(check["departureDateFrom"])
+    end = date.fromisoformat(check["departureDateTo"])
+    if start < today or end > today + timedelta(days=MAX_NEW_CHECK_DAYS_AHEAD):
+        raise ContractError("New check dates must be between today and 730 days ahead (Europe/Warsaw).")
+    if (end - start).days + 1 > MAX_NEW_CHECK_RANGE_DAYS:
+        raise ContractError("A new check may cover at most 366 departure dates, inclusive.")
+    return check

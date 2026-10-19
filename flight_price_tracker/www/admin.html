@@ -8,6 +8,12 @@
     :root { color-scheme: light dark; font: 16px system-ui, sans-serif; }
     body { max-width: 1100px; margin: auto; padding: 24px; }
     button { font: inherit; padding: 10px 16px; cursor: pointer; }
+    input { font: inherit; padding: 8px; max-width: 100%; box-sizing: border-box; }
+    details { margin-block: 20px; }
+    summary { cursor: pointer; padding-block: 10px; }
+    fieldset { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; padding: 16px; }
+    label { display: grid; gap: 6px; }
+    .hint { color: GrayText; }
     .table-wrap { overflow-x: auto; }
     table { width: 100%; border-collapse: collapse; }
     th, td { text-align: left; padding: 12px; border-bottom: 1px solid #8886; }
@@ -16,9 +22,27 @@
 </head>
 <body>
   <h1>Flight Price Tracker</h1>
-  <p>Enable or disable monitoring checks stored in S3. Disabling preserves all historical observations.</p>
+  <p>Add, enable or disable monitoring checks stored in S3. Disabling preserves all historical observations.</p>
   <button id="refresh" type="button">Refresh</button>
   <p id="status" role="status" aria-live="polite">Loading…</p>
+  <details id="create-section">
+    <summary>Add check</summary>
+    <p class="hint">Use a unique, permanent ID. Dates are inclusive, from today up to 730 days ahead
+      in Europe/Warsaw, covering at most 366 departure dates.</p>
+    <form id="create-form">
+      <fieldset id="create-fields" disabled>
+        <legend>New monitoring check</legend>
+        <label>ID<input name="id" required maxlength="128" pattern="[a-z0-9]+(-[a-z0-9]+)*" placeholder="krk-mad-feb-2027" autocomplete="off"></label>
+        <label>Origin (IATA)<input name="origin" required minlength="3" maxlength="3" pattern="[A-Za-z]{3}" placeholder="KRK" autocomplete="off"></label>
+        <label>Destination (IATA)<input name="destination" required minlength="3" maxlength="3" pattern="[A-Za-z]{3}" placeholder="MAD" autocomplete="off"></label>
+        <label>Departure from<input name="departureDateFrom" type="date" required></label>
+        <label>Departure to<input name="departureDateTo" type="date" required></label>
+        <label>Currency<input name="currency" required minlength="3" maxlength="3" pattern="[A-Za-z]{3}" value="PLN" autocomplete="off"></label>
+        <label><span>Collect prices</span><span><input name="enabled" type="checkbox" checked> Enabled</span></label>
+        <button type="submit">Add check</button>
+      </fieldset>
+    </form>
+  </details>
   <div class="table-wrap">
     <table aria-label="Monitoring checks">
       <thead><tr><th>ID</th><th>Origin</th><th>Destination</th><th>From</th><th>To</th><th>Currency</th><th>Status</th><th>Action</th></tr></thead>
@@ -29,11 +53,14 @@
     const button = document.querySelector('#refresh');
     const status = document.querySelector('#status');
     const tbody = document.querySelector('#checks');
+    const createForm = document.querySelector('#create-form');
+    const createFields = document.querySelector('#create-fields');
     let etag = null;
     function lockActions() {
       for (const action of tbody.querySelectorAll('button')) action.disabled = true;
+      createFields.disabled = true;
     }
-    async function toggle(check) {
+    async function mutate(path, method, payload, message, confirmed = () => {}) {
       if (!etag) return;
       const expected = etag;
       etag = null;
@@ -41,24 +68,26 @@
       lockActions();
       status.textContent = 'Saving…';
       try {
-        const path = `api/checks/${encodeURIComponent(check.id)}/enabled`;
         const response = await fetch(new URL(path, document.baseURI), {
-          method: 'PATCH',
+          method,
           headers: {'Content-Type': 'application/json', 'If-Match': expected},
-          body: JSON.stringify({enabled: !check.enabled}),
+          body: JSON.stringify(payload),
         });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error?.message || 'Could not confirm the update.');
-        await load('Check updated.');
+        confirmed();
+        await load(message);
       } catch (error) {
         status.textContent = `${error.message} Refresh before trying again.`;
       } finally {
         button.disabled = false;
+        createFields.disabled = !etag;
       }
     }
     async function load(message = '') {
       button.disabled = true;
       etag = null;
+      lockActions();
       tbody.replaceChildren();
       status.textContent = 'Loading…';
       try {
@@ -82,11 +111,29 @@
         }
         status.textContent = data.checks.length ? `${message} ${data.checks.length} checks loaded.`.trim() : 'No checks configured.';
       } catch (error) {
-        status.textContent = `Could not load checks: ${error.message}`;
+        etag = null;
+        lockActions();
+        status.textContent = `${message} Could not load checks: ${error.message}`.trim();
       } finally {
         button.disabled = false;
+        createFields.disabled = !etag;
       }
     }
+    async function toggle(check) {
+      await mutate(`api/checks/${encodeURIComponent(check.id)}/enabled`, 'PATCH',
+        {enabled: !check.enabled}, 'Check updated.');
+    }
+    createForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      if (!etag || createFields.disabled) return;
+      const fields = new FormData(createForm);
+      const payload = {id: fields.get('id').trim(), enabled: fields.has('enabled')};
+      for (const name of ['origin', 'destination', 'currency']) {
+        payload[name] = fields.get(name).trim().toUpperCase();
+      }
+      for (const name of ['departureDateFrom', 'departureDateTo']) payload[name] = fields.get(name);
+      await mutate('api/checks', 'POST', payload, 'Check added.', () => createForm.reset());
+    });
     button.addEventListener('click', () => load());
     load();
   </script>

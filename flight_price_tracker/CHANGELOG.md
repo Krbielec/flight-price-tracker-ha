@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.0
+
+- Add new monitoring checks through an administrator-only Ingress form.
+- Validate unique slug IDs, routes, currencies and inclusive future date ranges.
+- Protect creation with the current config ETag and conditional S3 writes.
+- Preserve existing checks and extension fields; retain form input on failures.
+
 ## 0.2.0
 
 - Enable/disable existing checks from the Ingress panel.

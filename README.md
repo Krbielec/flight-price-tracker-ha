@@ -1,14 +1,14 @@
 # Flight Price Tracker — Home Assistant
 
-Home Assistant add-on for viewing and enabling/disabling flight monitoring checks stored in S3. Daily
-Ryanair fare collection runs separately in AWS.
+Home Assistant add-on for adding, viewing and enabling/disabling flight monitoring
+checks stored in S3. Daily Ryanair fare collection runs separately in AWS.
 
 ## Current scope
 
-Version 0.2.0 adds administrator-only enable/disable controls to the Python/aiohttp
-Ingress panel. Server-side boto3 reads and conditionally updates `config/checks.json`.
-Creating/editing check definitions, observation reads, the HA dashboard integration,
-and charts remain later milestones.
+Version 0.3.0 adds an administrator-only form for new monitoring checks, alongside
+the enable/disable controls. Server-side boto3 reads and conditionally updates
+`config/checks.json`. Editing existing check definitions, observation reads, the HA
+dashboard integration, and charts remain later milestones.
 
 The private `flight-price-tracker-aws` repository owns infrastructure and collector
 code. This public repository must never contain AWS credentials, private
@@ -119,6 +119,44 @@ There are no unconditional writes or automatic conflict retries.
 During a save, all mutation buttons are disabled. After an error, refresh before
 trying again. A timeout may mean S3 accepted the write but its response was lost;
 the panel requests a fresh read instead of claiming that nothing changed.
+
+## Add a check
+
+Open **Add check** in the Ingress panel. Enter a unique permanent ID, origin and
+destination IATA codes, inclusive departure-date range, currency (defaults to
+`PLN`), and whether collection should be enabled. The form normalizes airport and
+currency input to uppercase. New checks default to enabled through the API when
+`enabled` is omitted. An enabled check participates in the next scheduled collector
+run; creating it does not trigger collection immediately.
+
+`POST /api/checks` accepts a single check object with the same required fields as
+the read example (`enabled` is optional). It requires an active HA administrator,
+JSON content type, and the configuration's current strong `If-Match` ETag, just
+like the enable/disable endpoint. Success returns 201 with the new check and a new
+ETag. It appends to the existing configuration rather than replacing the list.
+
+New IDs must be lowercase slugs (`letters`, `digits`, single hyphens between
+segments), up to 128 characters. Airport and currency codes must have exactly
+three uppercase ASCII letters; origin and destination must differ. Currency
+validation checks syntax, not membership of a currency registry; PLN remains the
+tested collector currency. There is no exchange-rate conversion or IATA registry
+lookup. Unsupported input fields are rejected; existing compatible extension
+fields remain preserved.
+
+For new checks only, dates must fall between today (Europe/Warsaw) and 730 days
+ahead, inclusive. A check can cover at most 366 departure dates, inclusive. These
+initial bounds do not restrict reading or enabling/disabling historical checks.
+They are input limits, not a guarantee of airline schedule availability.
+
+Invalid input returns 400. Reusing any existing ID (including a disabled check)
+returns 409 without updating that check. A stale ETag or an intervening S3 write
+also returns 409. Missing or malformed S3 configuration is an error, never a reason
+to initialize a replacement document. Existing write-failure handling applies.
+
+All mutation controls are locked during save. Form values survive failed saves;
+after an error, refresh and verify the table before trying again. In particular,
+a lost response may mean creation succeeded, and reusing its ID must not create
+a duplicate. The form resets only after a confirmed successful response.
 
 ## Local verification
 
