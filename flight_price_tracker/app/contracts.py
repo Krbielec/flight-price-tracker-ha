@@ -1,6 +1,7 @@
 """Validate the version-one read contract without dropping compatible fields."""
 
 from datetime import date
+import simplejson as json
 import re
 from typing import Any
 
@@ -47,3 +48,31 @@ def validate_checks(document: Any) -> dict:
         if type(check.get("enabled")) is not bool:
             raise ContractError("Check enabled must be a boolean.")
     return document
+
+
+def decode_json(raw):
+    """Reject ambiguous duplicate keys and non-finite numbers before any write."""
+    try:
+        return json.loads(raw, object_pairs_hook=_unique_keys, use_decimal=True,
+                          parse_constant=_reject_constant)
+    except ArithmeticError:
+        raise ValueError("Unsupported JSON number") from None
+
+
+def _unique_keys(pairs):
+    document = {}
+    for key, value in pairs:
+        if key in document:
+            raise ValueError("Duplicate JSON key")
+        document[key] = value
+    return document
+
+
+def _reject_constant(_value):
+    raise ValueError("Non-finite JSON number")
+
+
+def encode_json(document):
+    """Preserve numeric precision in compatible fields while merging enabled."""
+    return json.dumps(document, use_decimal=True, ensure_ascii=True,
+                      allow_nan=False, separators=(",", ":"))

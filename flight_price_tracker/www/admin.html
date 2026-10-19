@@ -16,12 +16,12 @@
 </head>
 <body>
   <h1>Flight Price Tracker</h1>
-  <p>Monitoring checks stored in S3. This panel currently supports viewing only.</p>
+  <p>Enable or disable monitoring checks stored in S3. Disabling preserves all historical observations.</p>
   <button id="refresh" type="button">Refresh</button>
   <p id="status" role="status" aria-live="polite">Loading…</p>
   <div class="table-wrap">
     <table aria-label="Monitoring checks">
-      <thead><tr><th>ID</th><th>Origin</th><th>Destination</th><th>From</th><th>To</th><th>Currency</th><th>Status</th></tr></thead>
+      <thead><tr><th>ID</th><th>Origin</th><th>Destination</th><th>From</th><th>To</th><th>Currency</th><th>Status</th><th>Action</th></tr></thead>
       <tbody id="checks"></tbody>
     </table>
   </div>
@@ -29,29 +29,65 @@
     const button = document.querySelector('#refresh');
     const status = document.querySelector('#status');
     const tbody = document.querySelector('#checks');
-    async function load() {
+    let etag = null;
+    function lockActions() {
+      for (const action of tbody.querySelectorAll('button')) action.disabled = true;
+    }
+    async function toggle(check) {
+      if (!etag) return;
+      const expected = etag;
+      etag = null;
       button.disabled = true;
+      lockActions();
+      status.textContent = 'Saving…';
+      try {
+        const path = `api/checks/${encodeURIComponent(check.id)}/enabled`;
+        const response = await fetch(new URL(path, document.baseURI), {
+          method: 'PATCH',
+          headers: {'Content-Type': 'application/json', 'If-Match': expected},
+          body: JSON.stringify({enabled: !check.enabled}),
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error?.message || 'Could not confirm the update.');
+        await load('Check updated.');
+      } catch (error) {
+        status.textContent = `${error.message} Refresh before trying again.`;
+      } finally {
+        button.disabled = false;
+      }
+    }
+    async function load(message = '') {
+      button.disabled = true;
+      etag = null;
       tbody.replaceChildren();
       status.textContent = 'Loading…';
       try {
         const response = await fetch(new URL('api/checks', document.baseURI), {cache: 'no-store'});
         const data = await response.json();
         if (!response.ok) throw new Error(data.error?.message || 'Could not load checks.');
+        etag = response.headers.get('ETag');
+        if (!etag) throw new Error('Missing configuration version.');
         for (const check of data.checks) {
           const row = tbody.insertRow();
           for (const value of [check.id, check.origin, check.destination, check.departureDateFrom,
             check.departureDateTo, check.currency, check.enabled ? 'Enabled' : 'Disabled']) {
             row.insertCell().textContent = value;
           }
+          const action = document.createElement('button');
+          action.type = 'button';
+          action.textContent = check.enabled ? 'Disable' : 'Enable';
+          action.setAttribute('aria-label', `${action.textContent} ${check.id}`);
+          action.addEventListener('click', () => toggle(check));
+          row.insertCell().append(action);
         }
-        status.textContent = data.checks.length ? `${data.checks.length} checks loaded.` : 'No checks configured.';
+        status.textContent = data.checks.length ? `${message} ${data.checks.length} checks loaded.`.trim() : 'No checks configured.';
       } catch (error) {
         status.textContent = `Could not load checks: ${error.message}`;
       } finally {
         button.disabled = false;
       }
     }
-    button.addEventListener('click', load);
+    button.addEventListener('click', () => load());
     load();
   </script>
 </body>

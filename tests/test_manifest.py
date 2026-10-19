@@ -11,7 +11,7 @@ def test_addon_exposes_only_ingress():
     assert set(config["arch"]) == {"amd64", "aarch64"}
     assert "ports" not in config
     assert "map" not in config
-    assert not config.get("homeassistant_api", False)
+    assert config["homeassistant_api"] is True
     for field in ("aws_access_key_id", "aws_secret_access_key"):
         assert config["options"][field] == ""
         assert config["schema"][field] == "password"

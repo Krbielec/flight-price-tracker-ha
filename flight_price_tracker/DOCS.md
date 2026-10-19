@@ -1,7 +1,7 @@
 # Flight Price Tracker — first test in Home Assistant
 
-This version only reads and displays monitoring checks from S3. It cannot change
-checks or display price charts.
+Version 0.2.0 displays S3 checks and lets administrators enable or disable them.
+It cannot create/edit check definitions or display price charts.
 
 1. Add `https://github.com/Krbielec/flight-price-tracker-ha` under **Settings →
    Apps → App store → ⋮ → Repositories** (called **Add-ons / Add-on store** in
@@ -18,9 +18,21 @@ checks or display price charts.
    disabled checks. Use **Refresh** to reread S3. An empty configuration shows
    **No checks configured**; errors are displayed separately.
 
-For this version, the IAM identity only needs `s3:GetObject` for the existing
-bucket's `config/checks.json`. The add-on performs no writes or deletions. It
-exposes no host HTTP port; open it through Home Assistant Ingress.
+The IAM identity needs `s3:GetObject` and `s3:PutObject` only for the existing
+bucket's `config/checks.json`. It does not modify observations or delete objects.
+It exposes no host HTTP port; open it through Home Assistant Ingress.
+
+After upgrading from 0.1.0, restart the add-on and reopen its panel so Ingress
+provides your user identity. The add-on now requests internal HA API access to
+verify administrator roles, using the server-only Supervisor token. Missing user
+identity denies access; unavailable role checks deny access with a service error.
+
+To test enabled-state changes, use **Disable** on a check, refresh, and verify it
+remains disabled. Use **Enable** to restore it if desired. Disabling affects future
+scheduled collection and preserves all history; it does not cancel a running job.
+Only perform this test on a check you intend to change. In two tabs, make a change
+in the first and try a change from the stale second tab: it should report a
+conflict and require **Refresh**, rather than overwrite the first change.
 
 If installation reports an image error, confirm the GitHub Actions workflow has
 completed successfully and the `flight-price-tracker` GHCR package is public.
@@ -29,6 +41,8 @@ For S3 failures, check bucket, region, IAM permissions, and object existence.
 Do not share credentials or raw AWS debug output while troubleshooting.
 
 Before relying on this version, verify that a non-admin account cannot open the
-admin panel. `panel_admin` controls sidebar visibility; proxy checks alone do not
-prove an administrator role. Independent authorization must be added before any
-future mutation endpoints.
+panel or mutate a check. In addition to `panel_admin`, the backend checks the
+Ingress peer and the user's current active administrator role in HA for every
+request. A 403 indicates missing identity or insufficient rights; a 503 with
+`authorization_unavailable` means the internal HA API could not verify the role.
+Never work around this by disabling the authorization check.

@@ -1,13 +1,14 @@
 # Flight Price Tracker — Home Assistant
 
-Home Assistant add-on for viewing flight monitoring checks stored in S3. Daily
+Home Assistant add-on for viewing and enabling/disabling flight monitoring checks stored in S3. Daily
 Ryanair fare collection runs separately in AWS.
 
 ## Current scope
 
-The first milestone provides a Python/aiohttp add-on, an Ingress panel showing
-checks, and server-side boto3 reads of `config/checks.json`. There are no write
-endpoints, observation reads, HA integration, Lovelace card, or charts yet.
+Version 0.2.0 adds administrator-only enable/disable controls to the Python/aiohttp
+Ingress panel. Server-side boto3 reads and conditionally updates `config/checks.json`.
+Creating/editing check definitions, observation reads, the HA dashboard integration,
+and charts remain later milestones.
 
 The private `flight-price-tracker-aws` repository owns infrastructure and collector
 code. This public repository must never contain AWS credentials, private
@@ -34,18 +35,26 @@ encrypt `/data/options.json`. Treat the add-on data directory and HA backups as
 sensitive. Supply credentials outside Git; do not paste options into issues or
 logs. This stage uses explicit IAM key options, not ambient AWS profiles.
 
-AWS calls run only on the server. For this stage, `s3:GetObject` on the single
-`config/checks.json` object is sufficient. No AWS deployment or IAM changes are
-performed by the add-on. It does not write to S3 or create a local config database.
+AWS calls run only on the server. This version needs `s3:GetObject` and
+`s3:PutObject` on the single `config/checks.json` object. No AWS deployment or IAM
+changes are performed by the add-on. It never writes or deletes observations and
+does not create a local config database.
 
 The manifest enables `panel_admin: true`, exposes only Ingress port 8099 internally,
-and publishes no host port. The server accepts only the actual Ingress proxy peer
-`172.30.32.2`; forwarded headers cannot bypass that check. Home Assistant handles
-Ingress authentication. **The peer check does not prove an administrator role**,
-and `panel_admin` controls panel visibility. This stage has only read operations;
-independent server-side administrator authorization is required before adding any
-mutations. Non-admin dashboard access will use a separate read-only HA bridge in
-a later milestone.
+and publishes no host port. The server first checks the actual Ingress proxy peer
+`172.30.32.2`; forwarded headers cannot bypass it. It then reads the Supervisor-set
+`X-Remote-User-Id` and uses the internal HA WebSocket API (`config/auth/list`) to
+verify the account is active and is an owner or member of `system-admin`.
+This check covers the page, reads, and writes and runs on every request, without
+caching permissions. Browser-supplied role headers are ignored.
+
+`homeassistant_api: true` grants the add-on access to HA Core. Its
+`SUPERVISOR_TOKEN` stays on the server and is used only for the role lookup; it is
+never returned to the browser. Missing identity or a non-admin account receives
+403; an unavailable or malformed HA authorization response receives 503, with no
+S3 operation. Older Ingress sessions without identity must be closed and reopened;
+there is no fallback to trusting the proxy alone. The future non-admin dashboard
+bridge will be a separate read-only interface.
 
 See the official [Ingress guide](https://developers.home-assistant.io/docs/apps/presentation/)
 and [configuration reference](https://developers.home-assistant.io/docs/apps/configuration/).
@@ -85,6 +94,31 @@ network/storage availability failures return 503. Errors have the form
 The backend limits configuration reads to 1 MiB, uses connection/read timeouts of
 5/10 seconds, and at most three SDK attempts. It runs blocking SDK I/O in a worker
 thread and closes response streams and the SDK client during cleanup.
+
+## Enable or disable a check
+
+The Ingress table provides an **Enable** or **Disable** button per check. Disabling
+stops future scheduled collection; it preserves the check definition and historical
+observations. It cannot cancel a collector run already in progress.
+
+`GET /api/checks` now includes the S3 configuration's strong `ETag` response header.
+`PATCH /api/checks/{id}/enabled` requires `Content-Type: application/json`, that
+exact ETag in `If-Match`, and a body containing only `{"enabled":false}` or
+`{"enabled":true}`. Success returns the updated check and a new ETag. No other
+fields can be changed through this endpoint.
+
+The backend rereads the full document, validates it, checks the supplied version,
+changes only `enabled` for the matching ID, and calls `PutObject` with S3 `IfMatch`.
+A stale browser version or an intervening S3 write returns 409 without overwriting
+the other writer. Unknown checks return 404; invalid requests return 400. Missing
+ETags, unsupported schemas, duplicate JSON keys, and malformed configurations
+prevent writes. Compatible unknown fields and all other checks are retained, including numeric
+precision in extension fields (via bounded `simplejson` Decimal support).
+There are no unconditional writes or automatic conflict retries.
+
+During a save, all mutation buttons are disabled. After an error, refresh before
+trying again. A timeout may mean S3 accepted the write but its response was lost;
+the panel requests a fresh read instead of claiming that nothing changed.
 
 ## Local verification
 
