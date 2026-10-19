@@ -49,8 +49,16 @@ jobs:
         run: python -m pip install -r requirements-dev.txt
       - name: Run mocked tests
         run: python -m pytest -q
-      - name: Test admin sorting and airport lookup
-        run: node tests/admin_helpers.test.mjs
+      - name: Test admin and chart data logic
+        run: node --test tests/*.test.mjs
+      - name: Install browser test dependencies
+        if: matrix.arch == 'amd64'
+        run: |
+          python -m pip install -r requirements-browser.txt
+          python -m playwright install --with-deps chromium
+      - name: Test Lovelace card in Chromium with synthetic HA responses
+        if: matrix.arch == 'amd64'
+        run: python tests/browser_card_smoke.py
       - name: Read add-on version
         id: metadata
         run: |

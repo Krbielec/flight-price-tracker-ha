@@ -5,11 +5,12 @@ checks stored in S3. Daily Ryanair fare collection runs separately in AWS.
 
 ## Current scope
 
-Version 0.4.0 adds paginated S3 observation reads and two response-returning HA
-services for authenticated dashboard users, including non-admins. The Ingress panel
-supports creating checks and enabling/disabling them, sorting, and airport selection.
-Editing existing definitions and chart rendering remain later milestones. Grafana
-versus native rendering remains undecided.
+Version 0.5.0 adds one dynamic Lovelace card: one chart panel per check, with
+separate series per flight departure date. It refreshes the check list automatically
+and reads observations through the existing response-returning HA services, including
+for non-admin viewers. The Ingress panel supports creating checks, enabling/disabling,
+sorting and airport selection. Editing existing definitions remains a later milestone.
+Native Lovelace rendering was selected with the user; Grafana remains a future option.
 
 The private `flight-price-tracker-aws` repository owns infrastructure and collector
 code. This public repository must never contain AWS credentials, private
@@ -232,10 +233,10 @@ inconsistent check IDs and duplicate departure dates within a run are errors.
 
 Pages preserve collection history, including multiple runs for the same day. They
 are traversed by S3 key order, then departure date within each run; this is not a
-global chronological price sort. Later chart rendering must select the latest
-`checkedAt` per Warsaw observation day and departure date, with a deterministic
-tie policy, while retaining raw history. No chart aggregation or FX conversion is
-performed in this stage.
+global chronological price sort. The Lovelace card selects the latest
+`checkedAt` per Warsaw observation day and departure date, breaking timestamp ties by a fixed
+lexical comparison of currency/price/status/flight-time fields. Aggregation is only
+in browser memory; raw S3 history remains unchanged. No FX conversion is performed.
 
 Pagination uses S3 `ListObjectsV2` with a bounded `MaxKeys` and `StartAfter`, so it
 continues beyond 1,000 objects without loading the whole listing. A page visits at
@@ -248,7 +249,7 @@ throughout a traversal. A resumed final run can require one extra empty end page
 
 Immutable run bodies are cached in memory with limits of 64 objects / 8 MiB of
 source JSON. Config reads and listings are still performed; there is no second
-authoritative database. To refresh a future chart, request from the last known
+authoritative database. To refresh a chart, request from the last known
 `checkedDate` inclusively rather than rereading all history. Filters start listing
 one partition day earlier to cover UTC/Warsaw midnight boundaries and stop after
 the requested end partition; partitions are expected to use UTC or Warsaw dates
@@ -316,7 +317,77 @@ HA-facing tests use focused Core doubles, real voluptuous schemas, and a local
 WebSocket/HTTP server. They cover non-admin reads and absence of mutations without
 requiring a real HA instance. Actual Core loading and tablet access remain an
 operational test for when you next update HA; you can skip installing 0.3.1 first.
-This stage supplies data services only, not a Lovelace chart card.
+The Lovelace card below uses these services without Ingress access.
+
+## Dynamic Lovelace card
+
+After updating to 0.5.0 and starting the add-on, the managed card assets are copied
+into `/config/www/flight-price-tracker/`. Existing unmanaged directories or symlinks
+are refused; other files in `www` are preserved. Nothing edits your dashboards or
+registers resources automatically. If this is the first time HA's `www` directory
+has been created, restart HA Core once so `/local/` becomes available.
+
+Enable the HA integration as described above. In **Settings → Dashboards → Resources**
+(enable Advanced Mode if necessary), add this **JavaScript module** once:
+
+```text
+/local/flight-price-tracker/flight-price-tracker-card.js?v=0.5.0
+```
+
+On the existing tablet dashboard, add one manual card:
+
+```yaml
+type: custom:flight-price-tracker-card
+title: Ceny lotów
+show_disabled: true
+refresh_interval: 60
+```
+
+This single card dynamically contains as many chart panels as there are checks.
+It creates no persistent per-check YAML cards. The list is reloaded automatically
+60 seconds after a refresh finishes, or with **Odśwież**. A new check appears on
+the next refresh, with an explicit empty-history message until collection produces
+observations. `show_disabled` defaults to true; the viewer can also toggle it locally.
+`refresh_interval` accepts 30–3600 seconds. Polling stops when the card is removed
+or the browser tab is hidden and resumes on return. Unrelated HA state updates do
+not trigger S3 reads. Each card keeps only its own in-memory cache; a page reload
+starts a full read. A single card per dashboard is recommended.
+
+X is the observation date in Europe/Warsaw; Y is the price in the check's currency.
+Each flight departure date is a separate colored series. Legend buttons toggle
+series locally. Tap, hover or focus a point to see exact local departure/arrival
+strings (including next-day arrival), fare/status and UTC collection timestamp.
+Unavailable/sold-out prices are hollow status markers at the baseline, **not zero
+fares**, and interrupt the line. Days without observations also interrupt lines.
+Themes use HA CSS variables; a narrow plot scrolls inside the card on small screens.
+
+Reads are sequential to respect server worker limits. Every page is followed,
+including empty pages with a cursor. A failed page never commits a partial update;
+old chart data remain visible with a stale-data warning. List errors are separate
+from an empty check list. A later refresh restarts pagination with a new cursor,
+so add-on restarts do not permanently strand the card. There are no browser AWS
+calls, external chart scripts, CDN requests, write services or Grafana dependencies.
+
+Initial reads cover all available history. Subsequent reads start from the newest
+known Warsaw observation date inclusively. Late backfills into older dates require
+reloading the dashboard. Safety limits per check are 1,000 pages, 100,000 raw rows
+per refresh and 20,000 aggregated points; exceeding a limit shows an error rather
+than truncating the chart silently. Larger histories will need a later range/rollup
+milestone. Switching currencies in historical data is rejected instead of mixed.
+
+Offline browser verification (optional locally; runs in CI on amd64):
+
+```sh
+.venv/bin/python -m pip install -r requirements-browser.txt
+.venv/bin/python -m playwright install chromium
+.venv/bin/python tests/browser_card_smoke.py
+```
+
+The Chromium test uses a mobile viewport and synthetic HA responses. It exercises
+six-to-seven automatic panels, touch/keyboard details, series toggles, disabled
+checks, incremental reads, errors and lifecycle cleanup. Real HA/tablet installation
+and non-admin dashboard use still need an operational smoke test. For updates,
+increment the resource URL version and reload the browser to replace cached JS.
 
 ## Local verification
 
@@ -326,7 +397,7 @@ Use Python 3.13 (the container runtime) or newer, plus Node.js for the UI helper
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements-dev.txt
 .venv/bin/python -m pytest -q
-node tests/admin_helpers.test.mjs
+node --test tests/*.test.mjs
 ```
 
 Tests use fake credentials, `botocore.stub.Stubber`, and local aiohttp servers.
@@ -384,5 +455,5 @@ tracks the 3.13 patch series on Debian Bookworm.
 Architecture reference: [Krbielec/calendar](https://github.com/Krbielec/calendar),
 reviewed at commit `795e2f6bdfcc61207f7ad341c06cefd61ffeba81`. We reuse the
 add-on/Ingress layout. Calendar's HA response-service/event bridge and custom
-Lovelace card are reference patterns for later stages. Grafana versus native chart
-rendering remains a separate decision before the chart milestone.
+Lovelace card are reference patterns. The user selected native Lovelace charts for
+this stage; Grafana can be considered separately in the future.

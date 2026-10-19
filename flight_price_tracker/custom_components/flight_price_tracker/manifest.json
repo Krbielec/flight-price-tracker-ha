@@ -1,7 +1,7 @@
 {
   "domain": "flight_price_tracker",
   "name": "Flight Price Tracker",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "documentation": "https://github.com/Krbielec/flight-price-tracker-ha",
   "issue_tracker": "https://github.com/Krbielec/flight-price-tracker-ha/issues",
   "codeowners": ["@Krbielec"],

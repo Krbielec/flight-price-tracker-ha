@@ -1,0 +1,2 @@
+# Optional Chromium smoke tests; never installed in the add-on image.
+playwright>=1.64,<2

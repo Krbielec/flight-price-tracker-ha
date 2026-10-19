@@ -60,6 +60,7 @@ async def test_runtime_lifecycle_stops_bridge_before_closing_storage(monkeypatch
     bridge.run = run_bridge
     monkeypatch.setattr(entry, 'S3Observations', Mock(return_value=observations))
     monkeypatch.setattr(entry, 'HomeAssistantBridge', Mock(return_value=bridge))
+    monkeypatch.setattr(entry, 'install_card', Mock())
     monkeypatch.setattr(entry, 'install_integration', Mock())
     app = entry.create_runtime_app(store)
     app.freeze()
@@ -76,11 +77,36 @@ async def test_unmanaged_integration_keeps_admin_app_available(monkeypatch):
     bridge_factory = Mock()
     monkeypatch.setattr(entry, 'S3Observations', Mock(return_value=observations))
     monkeypatch.setattr(entry, 'HomeAssistantBridge', bridge_factory)
+    monkeypatch.setattr(entry, 'install_card', Mock())
     monkeypatch.setattr(entry, 'install_integration', Mock(side_effect=IntegrationInstallError('Unmanaged directory')))
     app = entry.create_runtime_app(store)
     app.freeze()
     await app.startup()
     bridge_factory.assert_not_called()
+    await app.cleanup()
+    observations.close.assert_awaited_once()
+    store.close.assert_awaited_once()
+
+
+async def test_card_install_failure_does_not_stop_read_bridge(monkeypatch):
+    import asyncio
+    from unittest.mock import AsyncMock
+    from app.integration_install import IntegrationInstallError
+    store, observations = AsyncMock(), AsyncMock()
+    started = asyncio.Event()
+    async def run_bridge():
+        started.set()
+        await asyncio.Event().wait()
+    bridge = Mock()
+    bridge.run = run_bridge
+    monkeypatch.setattr(entry, 'S3Observations', Mock(return_value=observations))
+    monkeypatch.setattr(entry, 'HomeAssistantBridge', Mock(return_value=bridge))
+    monkeypatch.setattr(entry, 'install_card', Mock(side_effect=IntegrationInstallError('Unmanaged directory')))
+    monkeypatch.setattr(entry, 'install_integration', Mock())
+    app = entry.create_runtime_app(store)
+    app.freeze()
+    await app.startup()
+    await asyncio.wait_for(started.wait(), 1)
     await app.cleanup()
     observations.close.assert_awaited_once()
     store.close.assert_awaited_once()

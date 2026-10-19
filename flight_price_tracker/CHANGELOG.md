@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.5.0
+
+- Add one native Lovelace card with dynamic chart panels for all checks; new checks
+  appear on automatic refresh without per-check YAML edits.
+- Read through HA services only, with sequential pagination, incremental in-memory
+  refresh, stale/error states and optional disabled-check visibility.
+- Plot per-departure-date series with latest daily observations, deterministic ties,
+  gaps for unavailable prices and touch/keyboard details preserving local times.
+- Install managed card assets under HA www without changing unrelated files or
+  dashboard configuration. Document one-time resource/card registration.
+- Add offline aggregation, lifecycle and mobile Chromium tests to CI.
+- Include timestamps in add-on logs.
+
 ## 0.4.0
 
 - Read S3 observations with bounded, signed pagination and an immutable-object cache.

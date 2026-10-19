@@ -1,8 +1,8 @@
 # Flight Price Tracker — first test in Home Assistant
 
-Version 0.4.0 displays S3 checks and lets administrators add, enable or disable
+Version 0.5.0 displays S3 checks and lets administrators add, enable or disable
 them. It also provides read-only HA services for observation history. Editing existing
-check definitions and displaying charts are later steps.
+check definitions remains a later step. A dynamic Lovelace chart card is included.
 
 1. Add `https://github.com/Krbielec/flight-price-tracker-ha` under **Settings →
    Apps → App store → ⋮ → Repositories** (called **Add-ons / Add-on store** in
@@ -110,5 +110,51 @@ The same read actions are intended for authenticated non-admin dashboard users.
 Verify read access from an authenticated viewer session when you test the future
 dashboard; the Ingress admin panel stays administrator-only. There are no write
 services or write event commands. Read calls without an active user context fail.
-No AWS credentials belong in dashboard configuration. This release does not yet
-install a chart card; Grafana versus native rendering remains a separate choice.
+No AWS credentials belong in dashboard configuration. The native Lovelace card was selected for this stage; Grafana remains a future option.
+
+
+## Add the dynamic chart card
+
+Start version 0.5.0 to install `/config/www/flight-price-tracker/`. If HA's `www`
+directory was just created for the first time, restart HA Core once to enable
+`/local/` files. The integration above must already be enabled.
+
+In **Settings → Dashboards → Resources**, add a **JavaScript module**:
+
+```text
+/local/flight-price-tracker/flight-price-tracker-card.js?v=0.5.0
+```
+
+Add one manual card to the existing dashboard:
+
+```yaml
+type: custom:flight-price-tracker-card
+title: Ceny lotów
+show_disabled: true
+refresh_interval: 60
+```
+
+One card renders one chart per check. After adding a check in the admin panel,
+wait for the next automatic refresh (60 seconds after the previous read finishes)
+or press **Odśwież**: a new panel must appear without any YAML change. Checks with
+no observations show an empty-history message. A viewer can hide disabled checks
+locally. No viewer operation changes S3 configuration.
+
+Tap a point for fare, local departure and arrival times, including next-day dates.
+Legend buttons hide/show individual departure-date series. Missing fares break
+lines and appear as hollow status markers, not zero prices. The X axis is the
+Warsaw observation date. Multiple daily reads use the latest run per departure date.
+
+Test on the tablet and a non-admin dashboard session. The chart must work while
+the Ingress admin panel remains inaccessible to that user. Try a temporary add-on
+stop: reads must show an error/stale-data warning and recover after restart and
+refresh. Pagination cursors are restarted automatically on the next attempt.
+
+The first read loads full history; later reads reread the newest observation day
+inclusively. Reload the dashboard after older historical backfills. Bounds per
+check: 1,000 pages, 100,000 raw rows per refresh, 20,000 aggregated points. A bound
+or mixed-currency failure shows an error instead of a truncated/mixed chart.
+
+Card files are managed only in their dedicated directory; an existing unmanaged
+directory is refused. Dashboard resources and YAML are not edited automatically.
+For later upgrades, change the resource URL's version and reload the browser.

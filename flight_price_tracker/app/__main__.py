@@ -11,7 +11,7 @@ from .admin import create_app
 from .s3_checks import S3Checks
 from .observations import ReadFacade, S3Observations
 from .ha_bridge import HomeAssistantBridge
-from .integration_install import IntegrationInstallError, install_integration
+from .integration_install import IntegrationInstallError, install_card, install_integration
 from .settings import Settings, SettingsError
 
 LOG = logging.getLogger(__name__)
@@ -25,6 +25,10 @@ def create_runtime_app(store):
 
     async def start_bridge(_app):
         nonlocal bridge_task
+        try:
+            await asyncio.to_thread(install_card)
+        except IntegrationInstallError:
+            LOG.error("Lovelace card install failed; check for an unmanaged destination directory")
         try:
             await asyncio.to_thread(install_integration)
         except IntegrationInstallError as exc:
@@ -45,7 +49,7 @@ def create_runtime_app(store):
 
 
 def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
     try:
         settings = Settings.load(OPTIONS_PATH)
         store = S3Checks.from_settings(settings)

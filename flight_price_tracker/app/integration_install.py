@@ -15,7 +15,7 @@ class IntegrationInstallError(Exception):
     pass
 
 
-def install_integration(source=SOURCE, destination=DESTINATION):
+def install_integration(source=SOURCE, destination=DESTINATION, *, files=FILES):
     destination = Path(destination)
     try:
         if destination.is_symlink() or destination.parent.is_symlink():
@@ -24,8 +24,8 @@ def install_integration(source=SOURCE, destination=DESTINATION):
             marker = destination / MARKER
             if marker.is_symlink() or not marker.is_file() or marker.read_text() != OWNER:
                 raise IntegrationInstallError("Existing integration directory is not managed by this add-on.")
-        content = {name: (Path(source) / name).read_bytes() for name in FILES}
-        for name in (*FILES, MARKER):
+        content = {name: (Path(source) / name).read_bytes() for name in files}
+        for name in (*files, MARKER):
             target = destination / name
             if target.is_symlink() or (target.exists() and not target.is_file()):
                 raise IntegrationInstallError("Integration contains an unsafe destination path.")
@@ -36,6 +36,13 @@ def install_integration(source=SOURCE, destination=DESTINATION):
             _replace(destination / name, raw)
     except (OSError, ValueError):
         raise IntegrationInstallError("Could not install the managed HA integration.") from None
+
+
+def install_card(source=None, destination=Path("/config/www/flight-price-tracker")):
+    """Publish only bundled read-only assets; never register/edit dashboard YAML."""
+    source = source or Path(__file__).resolve().parent.parent / "www"
+    install_integration(source, destination,
+                        files=("flight-price-tracker-card.js", "flight-chart.mjs"))
 
 
 def _replace(path, raw):
