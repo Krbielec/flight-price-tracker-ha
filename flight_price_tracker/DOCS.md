@@ -1,6 +1,6 @@
 # Flight Price Tracker — first test in Home Assistant
 
-Version 0.3.0 displays S3 checks and lets administrators add, enable or disable
+Version 0.3.1 displays S3 checks and lets administrators add, enable or disable
 them. Editing existing check definitions and displaying charts are later steps.
 
 1. Add `https://github.com/Krbielec/flight-price-tracker-ha` under **Settings →
@@ -34,8 +34,19 @@ Only perform this test on a check you intend to change. In two tabs, make a chan
 in the first and try a change from the stale second tab: it should report a
 conflict and require **Refresh**, rather than overwrite the first change.
 
+Click a table column heading to sort ascending, then click again for descending.
+The direction arrow should update, and your sorting should remain after Refresh
+or an enable/disable operation. Airport columns display and sort by city/code
+labels. Enable is muted green and Disable is muted red; labels remain visible.
+
+Origin and destination are dropdowns. Search by city or code, then choose a label
+such as **Valencia - VLC**. Only `VLC` is saved, not the display label. Filtering
+must not silently clear an existing selection. The bundled list covers active
+IATA-coded airports worldwide; it is not a Ryanair route list. Existing codes
+outside this snapshot remain visible as raw codes and can still be toggled.
+
 To test creation, open **Add check** and use a unique lowercase ID, distinct
-three-letter airport codes, valid future departure dates, and currency (PLN is the
+airports from the dropdowns, valid future departure dates, and currency (PLN is the
 tested default). You can uncheck **Enabled** to save a check without scheduling
 future collection for it. Add it, refresh, and verify the new row and all previous
 rows remain. Adding a check does not run the collector immediately.

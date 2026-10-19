@@ -8,11 +8,18 @@
     :root { color-scheme: light dark; font: 16px system-ui, sans-serif; }
     body { max-width: 1100px; margin: auto; padding: 24px; }
     button { font: inherit; padding: 10px 16px; cursor: pointer; }
-    input { font: inherit; padding: 8px; max-width: 100%; box-sizing: border-box; }
+    input, select { font: inherit; padding: 8px; max-width: 100%; box-sizing: border-box; }
     details { margin-block: 20px; }
     summary { cursor: pointer; padding-block: 10px; }
     fieldset { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; padding: 16px; }
-    label { display: grid; gap: 6px; }
+    label, .airport-picker { display: grid; gap: 6px; }
+    .state-enable { background: #416354; border: 1px solid #345244; color: #fff; border-radius: 6px; }
+    .state-disable { background: #805c5c; border: 1px solid #694949; color: #fff; border-radius: 6px; }
+    .state-enable:hover:not(:disabled), .state-disable:hover:not(:disabled) { filter: brightness(1.12); }
+    button:disabled { opacity: .55; cursor: default; }
+    button:focus-visible, select:focus-visible, input:focus-visible { outline: 3px solid #7699c4; outline-offset: 2px; }
+    .sort-button { padding: 4px 0; border: 0; background: none; color: inherit; font-weight: inherit; width: 100%; text-align: left; }
+    .sort-indicator { margin-left: 4px; }
     .hint { color: GrayText; }
     .table-wrap { overflow-x: auto; }
     table { width: 100%; border-collapse: collapse; }
@@ -29,12 +36,21 @@
     <summary>Add check</summary>
     <p class="hint">Use a unique, permanent ID. Dates are inclusive, from today up to 730 days ahead
       in Europe/Warsaw, covering at most 366 departure dates.</p>
+    <p id="airport-status" class="hint" role="status" aria-live="polite">Loading airport list…</p>
     <form id="create-form">
       <fieldset id="create-fields" disabled>
         <legend>New monitoring check</legend>
         <label>ID<input name="id" required maxlength="128" pattern="[a-z0-9]+(-[a-z0-9]+)*" placeholder="krk-mad-feb-2027" autocomplete="off"></label>
-        <label>Origin (IATA)<input name="origin" required minlength="3" maxlength="3" pattern="[A-Za-z]{3}" placeholder="KRK" autocomplete="off"></label>
-        <label>Destination (IATA)<input name="destination" required minlength="3" maxlength="3" pattern="[A-Za-z]{3}" placeholder="MAD" autocomplete="off"></label>
+        <div class="airport-picker">
+          <label for="origin">Origin airport</label>
+          <input id="origin-search" type="search" placeholder="Search city or code" aria-label="Search origin airports" autocomplete="off">
+          <select id="origin" name="origin" required><option value="">Choose airport</option></select>
+        </div>
+        <div class="airport-picker">
+          <label for="destination">Destination airport</label>
+          <input id="destination-search" type="search" placeholder="Search city or code" aria-label="Search destination airports" autocomplete="off">
+          <select id="destination" name="destination" required><option value="">Choose airport</option></select>
+        </div>
         <label>Departure from<input name="departureDateFrom" type="date" required></label>
         <label>Departure to<input name="departureDateTo" type="date" required></label>
         <label>Currency<input name="currency" required minlength="3" maxlength="3" pattern="[A-Za-z]{3}" value="PLN" autocomplete="off"></label>
@@ -45,20 +61,128 @@
   </details>
   <div class="table-wrap">
     <table aria-label="Monitoring checks">
-      <thead><tr><th>ID</th><th>Origin</th><th>Destination</th><th>From</th><th>To</th><th>Currency</th><th>Status</th><th>Action</th></tr></thead>
+      <thead><tr>
+        <th aria-sort="none"><button class="sort-button" type="button" data-sort="id">ID<span class="sort-indicator" aria-hidden="true">↕</span></button></th>
+        <th aria-sort="none"><button class="sort-button" type="button" data-sort="origin">Origin<span class="sort-indicator" aria-hidden="true">↕</span></button></th>
+        <th aria-sort="none"><button class="sort-button" type="button" data-sort="destination">Destination<span class="sort-indicator" aria-hidden="true">↕</span></button></th>
+        <th aria-sort="none"><button class="sort-button" type="button" data-sort="departureDateFrom">From<span class="sort-indicator" aria-hidden="true">↕</span></button></th>
+        <th aria-sort="none"><button class="sort-button" type="button" data-sort="departureDateTo">To<span class="sort-indicator" aria-hidden="true">↕</span></button></th>
+        <th aria-sort="none"><button class="sort-button" type="button" data-sort="currency">Currency<span class="sort-indicator" aria-hidden="true">↕</span></button></th>
+        <th aria-sort="none"><button class="sort-button" type="button" data-sort="enabled">Status<span class="sort-indicator" aria-hidden="true">↕</span></button></th>
+        <th>Action</th>
+      </tr></thead>
       <tbody id="checks"></tbody>
     </table>
   </div>
-  <script>
+  <script type="module">
+    import {airportLabel, airportChoices, sortChecks} from './admin-helpers.mjs';
+
     const button = document.querySelector('#refresh');
     const status = document.querySelector('#status');
     const tbody = document.querySelector('#checks');
     const createForm = document.querySelector('#create-form');
     const createFields = document.querySelector('#create-fields');
+    const airportStatus = document.querySelector('#airport-status');
+    const sortButtons = document.querySelectorAll('[data-sort]');
     let etag = null;
+    let checks = [];
+    let airports = [];
+    let airportByCode = new Map();
+    let catalogReady = false;
+    let catalogLoading = false;
+    let sortKey = null;
+    let sortDirection = 'ascending';
+
+    function updateFormState() {
+      createFields.disabled = !etag || !catalogReady;
+    }
     function lockActions() {
       for (const action of tbody.querySelectorAll('button')) action.disabled = true;
       createFields.disabled = true;
+    }
+    function renderChecks() {
+      tbody.replaceChildren();
+      for (const check of sortChecks(checks, sortKey, sortDirection, airportByCode)) {
+        const row = tbody.insertRow();
+        for (const value of [check.id, airportLabel(check.origin, airportByCode),
+          airportLabel(check.destination, airportByCode), check.departureDateFrom,
+          check.departureDateTo, check.currency, check.enabled ? 'Enabled' : 'Disabled']) {
+          row.insertCell().textContent = value;
+        }
+        const action = document.createElement('button');
+        action.type = 'button';
+        action.textContent = check.enabled ? 'Disable' : 'Enable';
+        action.className = check.enabled ? 'state-disable' : 'state-enable';
+        action.disabled = !etag;
+        action.setAttribute('aria-label', `${action.textContent} ${check.id}`);
+        action.addEventListener('click', () => toggle(check));
+        row.insertCell().append(action);
+      }
+    }
+    function updateSortHeaders() {
+      for (const header of sortButtons) {
+        const active = header.dataset.sort === sortKey;
+        header.closest('th').setAttribute('aria-sort', active ? sortDirection : 'none');
+        header.querySelector('.sort-indicator').textContent = active ?
+          (sortDirection === 'ascending' ? '▲' : '▼') : '↕';
+      }
+    }
+    for (const header of sortButtons) {
+      header.addEventListener('click', () => {
+        sortDirection = sortKey === header.dataset.sort && sortDirection === 'ascending' ?
+          'descending' : 'ascending';
+        sortKey = header.dataset.sort;
+        updateSortHeaders();
+        renderChecks();
+      });
+    }
+    function populateAirports(field) {
+      const select = document.querySelector(`#${field}`);
+      const query = document.querySelector(`#${field}-search`).value;
+      const selected = select.value;
+      const options = document.createDocumentFragment();
+      const placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = 'Choose airport';
+      placeholder.defaultSelected = true;
+      options.append(placeholder);
+      for (const airport of airportChoices(airports, query, selected)) {
+        const option = document.createElement('option');
+        option.value = airport.code;
+        option.textContent = airportLabel(airport.code, airportByCode);
+        options.append(option);
+      }
+      select.replaceChildren(options);
+      select.value = selected;
+    }
+    for (const field of ['origin', 'destination']) {
+      document.querySelector(`#${field}-search`).addEventListener('input', () => populateAirports(field));
+    }
+    async function loadAirports() {
+      if (catalogReady || catalogLoading) return;
+      catalogLoading = true;
+      airportStatus.textContent = 'Loading airport list…';
+      try {
+        const response = await fetch(new URL('airports.json', document.baseURI), {cache: 'no-store'});
+        if (!response.ok) throw new Error('Airport list unavailable.');
+        const data = await response.json();
+        if (!Array.isArray(data) || !data.length || data.some((entry) =>
+          !entry || !/^[A-Z]{3}$/.test(entry.code) || typeof entry.city !== 'string' || !entry.city ||
+          typeof entry.name !== 'string') || new Set(data.map((entry) => entry.code)).size !== data.length) {
+          throw new Error('Airport list is invalid.');
+        }
+        airports = data;
+        airportByCode = new Map(data.map((entry) => [entry.code, entry]));
+        for (const field of ['origin', 'destination']) populateAirports(field);
+        catalogReady = true;
+        airportStatus.textContent = 'Search by city, airport name or IATA code, then choose an airport.';
+        renderChecks();
+      } catch (_error) {
+        airportStatus.textContent = 'Could not load airport list. Refresh to try again.';
+      } finally {
+        catalogLoading = false;
+        updateFormState();
+      }
     }
     async function mutate(path, method, payload, message, confirmed = () => {}) {
       if (!etag) return;
@@ -81,14 +205,15 @@
         status.textContent = `${error.message} Refresh before trying again.`;
       } finally {
         button.disabled = false;
-        createFields.disabled = !etag;
+        updateFormState();
       }
     }
     async function load(message = '') {
       button.disabled = true;
       etag = null;
-      lockActions();
-      tbody.replaceChildren();
+      checks = [];
+      renderChecks();
+      updateFormState();
       status.textContent = 'Loading…';
       try {
         const response = await fetch(new URL('api/checks', document.baseURI), {cache: 'no-store'});
@@ -96,27 +221,16 @@
         if (!response.ok) throw new Error(data.error?.message || 'Could not load checks.');
         etag = response.headers.get('ETag');
         if (!etag) throw new Error('Missing configuration version.');
-        for (const check of data.checks) {
-          const row = tbody.insertRow();
-          for (const value of [check.id, check.origin, check.destination, check.departureDateFrom,
-            check.departureDateTo, check.currency, check.enabled ? 'Enabled' : 'Disabled']) {
-            row.insertCell().textContent = value;
-          }
-          const action = document.createElement('button');
-          action.type = 'button';
-          action.textContent = check.enabled ? 'Disable' : 'Enable';
-          action.setAttribute('aria-label', `${action.textContent} ${check.id}`);
-          action.addEventListener('click', () => toggle(check));
-          row.insertCell().append(action);
-        }
-        status.textContent = data.checks.length ? `${message} ${data.checks.length} checks loaded.`.trim() : 'No checks configured.';
+        checks = data.checks;
+        renderChecks();
+        status.textContent = checks.length ? `${message} ${checks.length} checks loaded.`.trim() : 'No checks configured.';
       } catch (error) {
         etag = null;
         lockActions();
         status.textContent = `${message} Could not load checks: ${error.message}`.trim();
       } finally {
         button.disabled = false;
-        createFields.disabled = !etag;
+        updateFormState();
       }
     }
     async function toggle(check) {
@@ -132,9 +246,13 @@
         payload[name] = fields.get(name).trim().toUpperCase();
       }
       for (const name of ['departureDateFrom', 'departureDateTo']) payload[name] = fields.get(name);
-      await mutate('api/checks', 'POST', payload, 'Check added.', () => createForm.reset());
+      await mutate('api/checks', 'POST', payload, 'Check added.', () => {
+        createForm.reset();
+        for (const field of ['origin', 'destination']) populateAirports(field);
+      });
     });
-    button.addEventListener('click', () => load());
+    button.addEventListener('click', () => { load(); loadAirports(); });
+    loadAirports();
     load();
   </script>
 </body>

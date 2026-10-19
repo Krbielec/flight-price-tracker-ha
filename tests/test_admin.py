@@ -195,3 +195,22 @@ async def test_read_preserves_extension_number_precision(ingress_client, documen
     response = await ingress_client.get("/api/checks")
     assert response.status == 200
     assert '"extension":0.12345678901234567890123456789' in await response.text()
+
+
+@pytest.mark.parametrize('path,content_type', [('/airports.json', 'application/json'),
+                                              ('/admin-helpers.mjs', 'javascript')])
+async def test_local_panel_assets(ingress_client, store, path, content_type):
+    response = await ingress_client.get(path)
+    assert response.status == 200
+    assert content_type in response.headers['Content-Type']
+    if path.endswith('.json'):
+        airports = await response.json()
+        assert next(a for a in airports if a['code'] == 'VLC')['city'] == 'Valencia'
+    store.snapshot.assert_not_awaited()
+
+
+@pytest.mark.parametrize('path', ['/airports.json', '/admin-helpers.mjs'])
+async def test_local_assets_reject_direct_access(aiohttp_client, store, path):
+    client = await aiohttp_client(create_app(store))
+    response = await client.get(path)
+    assert response.status == 403

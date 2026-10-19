@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.1
+
+- Sort administration data columns by clicking their headings, with direction indicators.
+- Preserve local sorting after refreshes and enabled-state changes.
+- Use muted green/red Enable/Disable buttons with keyboard focus styles.
+- Bundle an offline OurAirports catalogue with searchable city/IATA dropdowns.
+- Display city/code labels while keeping the S3 airport-code contract unchanged.
+
 ## 0.3.0
 
 - Add new monitoring checks through an administrator-only Ingress form.

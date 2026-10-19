@@ -42,6 +42,12 @@ def create_app(store: S3Checks, authorizer: HAAdminAuthorizer | None = None) -> 
     async def index(_request):
         return web.FileResponse(ADMIN_HTML, headers={"Cache-Control": "no-store"})
 
+    async def airports(_request):
+        return web.FileResponse(ADMIN_HTML.parent / "airports.json", headers={"Cache-Control": "no-store"})
+
+    async def helpers(_request):
+        return web.FileResponse(ADMIN_HTML.parent / "admin-helpers.mjs", headers={"Cache-Control": "no-store"})
+
     async def checks(_request):
         payload, etag = await store.snapshot()
         return web.json_response(payload, dumps=encode_json, headers={"Cache-Control": "no-store", "ETag": etag})
@@ -77,6 +83,8 @@ def create_app(store: S3Checks, authorizer: HAAdminAuthorizer | None = None) -> 
         await store.close()
 
     app.router.add_get("/", index)
+    app.router.add_get("/airports.json", airports)
+    app.router.add_get("/admin-helpers.mjs", helpers)
     app.router.add_get("/api/checks", checks)
     app.router.add_post("/api/checks", create_check)
     app.router.add_patch("/api/checks/{check_id}/enabled", set_enabled)

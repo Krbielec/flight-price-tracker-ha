@@ -5,8 +5,9 @@ checks stored in S3. Daily Ryanair fare collection runs separately in AWS.
 
 ## Current scope
 
-Version 0.3.0 adds an administrator-only form for new monitoring checks, alongside
-the enable/disable controls. Server-side boto3 reads and conditionally updates
+Version 0.3.1 adds sortable administration columns, muted enable/disable button
+colors, and airport dropdowns with city names and IATA codes. The panel supports
+creating checks and enabling/disabling existing checks. Server-side boto3 reads and conditionally updates
 `config/checks.json`. Editing existing check definitions, observation reads, the HA
 dashboard integration, and charts remain later milestones.
 
@@ -124,8 +125,9 @@ the panel requests a fresh read instead of claiming that nothing changed.
 
 Open **Add check** in the Ingress panel. Enter a unique permanent ID, origin and
 destination IATA codes, inclusive departure-date range, currency (defaults to
-`PLN`), and whether collection should be enabled. The form normalizes airport and
-currency input to uppercase. New checks default to enabled through the API when
+`PLN`), and whether collection should be enabled. Airport choices display labels
+such as **Valencia - VLC**, while only the IATA code is submitted to S3. Currency
+input is normalized to uppercase. New checks default to enabled through the API when
 `enabled` is omitted. An enabled check participates in the next scheduled collector
 run; creating it does not trigger collection immediately.
 
@@ -158,14 +160,41 @@ after an error, refresh and verify the table before trying again. In particular,
 a lost response may mean creation succeeded, and reusing its ID must not create
 a duplicate. The form resets only after a confirmed successful response.
 
+## Administration table and airport selection
+
+Click any data-column heading to sort ascending; click it again for descending.
+The active heading displays an arrow and exposes its direction to assistive
+technology. ID sorting uses natural numeric order; dates sort chronologically,
+status groups disabled/enabled checks, and airport columns sort by their displayed
+city labels. The chosen sorting remains active across refreshes and saves while
+the panel is open. Sorting is local and does not change the check order in S3.
+Enable buttons are muted green; Disable buttons are muted red, with text labels
+and visible keyboard focus in both light and dark mode.
+
+Origin and destination dropdowns use an offline, bundled catalogue of 8,798
+active IATA-coded airports worldwide, based on the public-domain
+[OurAirports dataset](https://github.com/davidmegginson/ourairports-data). Filter by
+city, full airport name, or code; matching ignores case and decomposable accents.
+An already selected airport remains selected when the filter changes. The table
+also shows city/code labels, falling back to a raw code for historical or external
+checks whose airport is absent from the snapshot.
+
+The catalogue is a local lookup, not a list of Ryanair routes or available flights.
+It narrows dropdown choices without changing the backend IATA syntax contract.
+No browser request goes to an external airport service. If the local catalogue
+cannot be loaded, existing checks and their controls remain available; the create
+form stays disabled and Refresh retries loading the catalogue. See
+[airport data provenance and update instructions](flight_price_tracker/www/airports.SOURCE.md).
+
 ## Local verification
 
-Use Python 3.13 (the container runtime) or newer:
+Use Python 3.13 (the container runtime) or newer, plus Node.js for the UI helper tests:
 
 ```sh
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements-dev.txt
 .venv/bin/python -m pytest -q
+node tests/admin_helpers.test.mjs
 ```
 
 Tests use fake credentials, `botocore.stub.Stubber`, and local aiohttp servers.
