@@ -36,3 +36,51 @@ def test_main_starts_ingress_server(monkeypatch):
     entry.main()
     _, kwargs = run_app.call_args
     assert kwargs == dict(host="0.0.0.0", port=8099, access_log=None, print=None)
+
+
+async def test_runtime_lifecycle_stops_bridge_before_closing_storage(monkeypatch):
+    import asyncio
+    from unittest.mock import AsyncMock
+    order = []
+    started = asyncio.Event()
+    async def run_bridge():
+        order.append('bridge-start')
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            order.append('bridge-stop')
+    async def close_observations():
+        order.append('observations-close')
+    async def close_store():
+        order.append('store-close')
+    store, observations, bridge = AsyncMock(), AsyncMock(), Mock()
+    store.close.side_effect = close_store
+    observations.close.side_effect = close_observations
+    bridge.run = run_bridge
+    monkeypatch.setattr(entry, 'S3Observations', Mock(return_value=observations))
+    monkeypatch.setattr(entry, 'HomeAssistantBridge', Mock(return_value=bridge))
+    monkeypatch.setattr(entry, 'install_integration', Mock())
+    app = entry.create_runtime_app(store)
+    app.freeze()
+    await app.startup()
+    await asyncio.wait_for(started.wait(), 1)
+    await app.cleanup()
+    assert order == ['bridge-start', 'bridge-stop', 'observations-close', 'store-close']
+
+
+async def test_unmanaged_integration_keeps_admin_app_available(monkeypatch):
+    from unittest.mock import AsyncMock
+    from app.integration_install import IntegrationInstallError
+    store, observations = AsyncMock(), AsyncMock()
+    bridge_factory = Mock()
+    monkeypatch.setattr(entry, 'S3Observations', Mock(return_value=observations))
+    monkeypatch.setattr(entry, 'HomeAssistantBridge', bridge_factory)
+    monkeypatch.setattr(entry, 'install_integration', Mock(side_effect=IntegrationInstallError('Unmanaged directory')))
+    app = entry.create_runtime_app(store)
+    app.freeze()
+    await app.startup()
+    bridge_factory.assert_not_called()
+    await app.cleanup()
+    observations.close.assert_awaited_once()
+    store.close.assert_awaited_once()

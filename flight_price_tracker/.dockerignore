@@ -5,3 +5,6 @@
 !www/
 !www/**
 app/__pycache__/
+!custom_components/
+!custom_components/**
+custom_components/**/__pycache__/

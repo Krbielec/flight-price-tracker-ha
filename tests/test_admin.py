@@ -214,3 +214,24 @@ async def test_local_assets_reject_direct_access(aiohttp_client, store, path):
     client = await aiohttp_client(create_app(store))
     response = await client.get(path)
     assert response.status == 403
+
+
+async def test_admin_observation_endpoint(aiohttp_client, monkeypatch, store):
+    monkeypatch.setattr('app.admin.INGRESS_PROXY_IP', '127.0.0.1')
+    observations = AsyncMock()
+    observations.page.return_value = {'checkId': 'example-check', 'observations': [], 'nextCursor': None}
+    client = await aiohttp_client(create_app(store, AsyncMock(), observations))
+    response = await client.get('/api/checks/example-check/observations?page_size=25&cursor=opaque')
+    assert response.status == 200
+    assert await response.json() == observations.page.return_value
+    observations.page.assert_awaited_once_with('example-check', 25, 'opaque')
+
+
+@pytest.mark.parametrize('query', ['page_size=true', 'page_size=1.5', 'page_size=10&page_size=20', 'bucket=private'])
+async def test_bad_observation_query_is_rejected(aiohttp_client, monkeypatch, store, query):
+    monkeypatch.setattr('app.admin.INGRESS_PROXY_IP', '127.0.0.1')
+    observations = AsyncMock()
+    client = await aiohttp_client(create_app(store, AsyncMock(), observations))
+    response = await client.get('/api/checks/example-check/observations?' + query)
+    assert response.status == 400
+    observations.page.assert_not_awaited()

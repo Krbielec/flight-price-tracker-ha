@@ -1,0 +1,38 @@
+get_checks:
+  name: Get flight checks
+  description: Read monitoring checks. Authenticated active users, including non-admins, may call this action.
+  fields:
+    include_disabled:
+      name: Include disabled checks
+      default: true
+      selector:
+        boolean:
+get_observations:
+  name: Get flight observations
+  description: Read one bounded page of historical fares; pass nextCursor back as cursor until null.
+  fields:
+    check_id:
+      name: Check ID
+      required: true
+      selector:
+        text:
+    page_size:
+      name: Maximum fare rows
+      default: 200
+      selector:
+        number:
+          min: 1
+          max: 500
+          mode: box
+    cursor:
+      name: Continuation cursor
+      selector:
+        text:
+    checked_from:
+      name: First observation date (Europe/Warsaw, inclusive)
+      selector:
+        date:
+    checked_to:
+      name: Last observation date (Europe/Warsaw, inclusive)
+      selector:
+        date:

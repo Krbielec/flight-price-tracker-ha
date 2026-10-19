@@ -48,3 +48,14 @@ def new_check():
         "id": "new-check", "origin": "AAA", "destination": "CCC", "currency": "PLN",
         "departureDateFrom": start.isoformat(), "departureDateTo": (start + timedelta(days=6)).isoformat(),
     }
+
+
+@pytest.fixture
+def observation():
+    return {
+        "schemaVersion": 1, "checkId": "example-check", "checkedAt": "2026-10-19T22:30:00+00:00",
+        "origin": "AAA", "destination": "BBB", "departureDateFrom": "2027-02-14", "departureDateTo": "2027-02-21",
+        "prices": [{"departure_date": "2027-02-19", "departure_at": "2027-02-19T23:45:00",
+                    "arrival_at": "2027-02-20T02:15:00", "price": 196.5, "currency": "PLN",
+                    "sold_out": False, "unavailable": False}],
+    }

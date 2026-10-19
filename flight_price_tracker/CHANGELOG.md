@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.0
+
+- Read S3 observations with bounded, signed pagination and an immutable-object cache.
+- Filter by inclusive Warsaw observation dates for incremental refresh.
+- Preserve local flight times and normalize unavailable fares to null prices.
+- Expose read-only HA response services for authenticated users, including non-admins.
+- Install the managed custom integration without modifying HA YAML or unrelated files.
+- Keep all writes behind the existing administrator-only Ingress path.
+
 ## 0.3.1
 
 - Sort administration data columns by clicking their headings, with direction indicators.

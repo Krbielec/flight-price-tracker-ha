@@ -1,7 +1,8 @@
 # Flight Price Tracker — first test in Home Assistant
 
-Version 0.3.1 displays S3 checks and lets administrators add, enable or disable
-them. Editing existing check definitions and displaying charts are later steps.
+Version 0.4.0 displays S3 checks and lets administrators add, enable or disable
+them. It also provides read-only HA services for observation history. Editing existing
+check definitions and displaying charts are later steps.
 
 1. Add `https://github.com/Krbielec/flight-price-tracker-ha` under **Settings →
    Apps → App store → ⋮ → Repositories** (called **Add-ons / Add-on store** in
@@ -19,7 +20,9 @@ them. Editing existing check definitions and displaying charts are later steps.
    **No checks configured**; errors are displayed separately.
 
 The IAM identity needs `s3:GetObject` and `s3:PutObject` only for the existing
-bucket's `config/checks.json`. It does not modify observations or delete objects.
+bucket's `config/checks.json`, plus `s3:GetObject` for `observations/*` and
+`s3:ListBucket` limited to `observations/` prefixes. It does not modify observations
+or delete objects.
 It exposes no host HTTP port; open it through Home Assistant Ingress.
 
 When upgrading from 0.1.0, restart the add-on and reopen its panel so Ingress
@@ -74,3 +77,38 @@ Ingress peer and the user's current active administrator role in HA for every
 request. A 403 indicates missing identity or insufficient rights; a 503 with
 `authorization_unavailable` means the internal HA API could not verify the role.
 Never work around this by disabling the authorization check.
+
+## Enable the read-only HA integration when you next update
+
+You can update directly to this version without installing 0.3.1 separately.
+Start the add-on to install its managed integration files under
+`/config/custom_components/flight_price_tracker`. Add the following top-level
+entry to your existing HA `configuration.yaml`, merging it with other settings:
+
+```yaml
+flight_price_tracker:
+```
+
+Restart Home Assistant Core once. This is manual; the add-on does not edit your
+YAML or restart HA. Do not edit the integration files managed by the add-on.
+Existing unmarked directories and symlinks are refused for safety; check the
+add-on log if the integration could not be installed. Other files are preserved.
+
+Test `flight_price_tracker.get_checks` in Developer Tools → Actions. Then call
+`flight_price_tracker.get_observations` with your `check_id` and `page_size: 100`.
+Pass the returned `nextCursor` as `cursor` with identical parameters until it is
+null. An empty page with a cursor is not the end. Cursors expire across add-on
+restarts. For incremental refresh, use `checked_from` with the most recent known
+observation date (Europe/Warsaw), inclusively. `checked_to` is also supported.
+
+The response includes local flight departure/arrival strings and a Warsaw
+`checkedDate`. Unavailable/sold-out fares use null prices, not invented zeros.
+Multiple collection runs remain in the response; graph aggregation is a later
+stage. An S3 or bridge failure must show an error, never empty successful history.
+
+The same read actions are intended for authenticated non-admin dashboard users.
+Verify read access from an authenticated viewer session when you test the future
+dashboard; the Ingress admin panel stays administrator-only. There are no write
+services or write event commands. Read calls without an active user context fail.
+No AWS credentials belong in dashboard configuration. This release does not yet
+install a chart card; Grafana versus native rendering remains a separate choice.

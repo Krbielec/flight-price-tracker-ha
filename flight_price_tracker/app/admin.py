@@ -22,7 +22,7 @@ async def ingress_only(request: web.Request, handler):
     return await handler(request)
 
 
-def create_app(store: S3Checks, authorizer: HAAdminAuthorizer | None = None) -> web.Application:
+def create_app(store: S3Checks, authorizer: HAAdminAuthorizer | None = None, observations=None) -> web.Application:
     authorizer = authorizer if authorizer is not None else HAAdminAuthorizer()
 
     @web.middleware
@@ -79,13 +79,28 @@ def create_app(store: S3Checks, authorizer: HAAdminAuthorizer | None = None) -> 
         check, new_etag = await store.set_enabled(request.match_info["check_id"], body["enabled"], etag)
         return web.json_response(check, dumps=encode_json, headers={"Cache-Control": "no-store", "ETag": new_etag})
 
+    async def read_observations(request):
+        if observations is None:
+            raise ChecksReadError("observations_unavailable", "Observation reader is unavailable.", 503)
+        if set(request.query) - {"page_size", "cursor", "checked_from", "checked_to"} or any(len(request.query.getall(key)) != 1 for key in request.query):
+            raise ChecksReadError("invalid_parameters", "Unsupported or repeated observation parameter.", 400)
+        size = request.query.get("page_size", "200")
+        if not size.isascii() or not size.isdigit() or len(size) > 3:
+            raise ChecksReadError("invalid_parameters", "Invalid page_size.", 400)
+        filters = {name: request.query[name] for name in ("checked_from", "checked_to") if name in request.query}
+        payload = await observations.page(request.match_info["check_id"], int(size), request.query.get("cursor"), **filters)
+        return web.json_response(payload, dumps=encode_json, headers={"Cache-Control": "no-store"})
+
     async def cleanup(_app):
+        if observations is not None:
+            await observations.close()
         await store.close()
 
     app.router.add_get("/", index)
     app.router.add_get("/airports.json", airports)
     app.router.add_get("/admin-helpers.mjs", helpers)
     app.router.add_get("/api/checks", checks)
+    app.router.add_get("/api/checks/{check_id}/observations", read_observations)
     app.router.add_post("/api/checks", create_check)
     app.router.add_patch("/api/checks/{check_id}/enabled", set_enabled)
     app.on_cleanup.append(cleanup)

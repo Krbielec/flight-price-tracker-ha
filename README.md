@@ -5,11 +5,11 @@ checks stored in S3. Daily Ryanair fare collection runs separately in AWS.
 
 ## Current scope
 
-Version 0.3.1 adds sortable administration columns, muted enable/disable button
-colors, and airport dropdowns with city names and IATA codes. The panel supports
-creating checks and enabling/disabling existing checks. Server-side boto3 reads and conditionally updates
-`config/checks.json`. Editing existing check definitions, observation reads, the HA
-dashboard integration, and charts remain later milestones.
+Version 0.4.0 adds paginated S3 observation reads and two response-returning HA
+services for authenticated dashboard users, including non-admins. The Ingress panel
+supports creating checks and enabling/disabling them, sorting, and airport selection.
+Editing existing definitions and chart rendering remain later milestones. Grafana
+versus native rendering remains undecided.
 
 The private `flight-price-tracker-aws` repository owns infrastructure and collector
 code. This public repository must never contain AWS credentials, private
@@ -37,8 +37,10 @@ sensitive. Supply credentials outside Git; do not paste options into issues or
 logs. This stage uses explicit IAM key options, not ambient AWS profiles.
 
 AWS calls run only on the server. This version needs `s3:GetObject` and
-`s3:PutObject` on the single `config/checks.json` object. No AWS deployment or IAM
-changes are performed by the add-on. It never writes or deletes observations and
+`s3:PutObject` on the single `config/checks.json` object. Observation reads also
+require `s3:GetObject` on `observations/*` and `s3:ListBucket` restricted to prefixes
+under `observations/`. No access to raw collector data or Terraform state is needed.
+No AWS deployment or IAM changes are performed by the add-on. It never writes or deletes observations and
 does not create a local config database.
 
 The manifest enables `panel_admin: true`, exposes only Ingress port 8099 internally,
@@ -50,12 +52,12 @@ This check covers the page, reads, and writes and runs on every request, without
 caching permissions. Browser-supplied role headers are ignored.
 
 `homeassistant_api: true` grants the add-on access to HA Core. Its
-`SUPERVISOR_TOKEN` stays on the server and is used only for the role lookup; it is
-never returned to the browser. Missing identity or a non-admin account receives
+`SUPERVISOR_TOKEN` stays on the server and is used for role lookups and the read-only
+HA event bridge; it is never returned to the browser. Missing identity or a non-admin account receives
 403; an unavailable or malformed HA authorization response receives 503, with no
 S3 operation. Older Ingress sessions without identity must be closed and reopened;
-there is no fallback to trusting the proxy alone. The future non-admin dashboard
-bridge will be a separate read-only interface.
+there is no fallback to trusting the proxy alone. Non-admin dashboard access uses
+the separate read-only HA services below; it never calls the Ingress API.
 
 See the official [Ingress guide](https://developers.home-assistant.io/docs/apps/presentation/)
 and [configuration reference](https://developers.home-assistant.io/docs/apps/configuration/).
@@ -185,6 +187,136 @@ No browser request goes to an external airport service. If the local catalogue
 cannot be loaded, existing checks and their controls remain available; the create
 form stays disabled and Refresh retries loading the catalogue. See
 [airport data provenance and update instructions](flight_price_tracker/www/airports.SOURCE.md).
+
+## Observation read contract
+
+Administrator HTTP endpoint: `GET /api/checks/{id}/observations`. Dashboard clients
+use `flight_price_tracker.get_observations` through HA instead of Ingress.
+Both accept:
+
+| Parameter | Meaning |
+| --- | --- |
+| `page_size` | Maximum returned fare rows, 1–500; default 200 |
+| `cursor` | Opaque `nextCursor` from a previous response; omit for the first page |
+| `checked_from` | Optional first **observation** date in Europe/Warsaw, inclusive |
+| `checked_to` | Optional last **observation** date in Europe/Warsaw, inclusive |
+
+HA calls additionally require `check_id`; HTTP obtains it from the path. Date
+filters are `YYYY-MM-DD` and do not filter flight departure dates.
+
+```json
+{
+  "checkId": "example-check",
+  "observations": [{
+    "checkedAt": "2026-10-19T22:30:00+00:00",
+    "checkedDate": "2026-10-20",
+    "departureDate": "2027-02-19",
+    "departureAt": "2027-02-19T23:45:00",
+    "arrivalAt": "2027-02-20T02:15:00",
+    "price": 196.5,
+    "currency": "PLN",
+    "soldOut": false,
+    "unavailable": false
+  }],
+  "nextCursor": null
+}
+```
+
+`checkedAt` must be offset-aware UTC in the source; `checkedDate` is derived in
+Europe/Warsaw, including summer/winter offsets. Flight timestamps remain local
+airport wall-clock strings, with no added `Z` or inferred cross-airport conversion.
+Unavailable/sold-out rows have `price: null` and retain their availability flags
+and any known flight times. Available prices must be finite, numeric and nonnegative.
+A snapshot may have an empty price list. Missing v1 fields, unsupported schemas,
+inconsistent check IDs and duplicate departure dates within a run are errors.
+
+Pages preserve collection history, including multiple runs for the same day. They
+are traversed by S3 key order, then departure date within each run; this is not a
+global chronological price sort. Later chart rendering must select the latest
+`checkedAt` per Warsaw observation day and departure date, with a deterministic
+tie policy, while retaining raw history. No chart aggregation or FX conversion is
+performed in this stage.
+
+Pagination uses S3 `ListObjectsV2` with a bounded `MaxKeys` and `StartAfter`, so it
+continues beyond 1,000 objects without loading the whole listing. A page visits at
+most 10 run objects, each at most 1 MiB and 1,000 fares, and may contain fewer rows
+than `page_size`. It may even be empty **with a non-null cursor**. Keep paging until
+`nextCursor` is null. Cursors can resume inside a run and are signed and bound to
+the check, page size and date filters. They expire when the add-on restarts; begin
+a new read after an `invalid_cursor` error. Keep the same filters and page size
+throughout a traversal. A resumed final run can require one extra empty end page.
+
+Immutable run bodies are cached in memory with limits of 64 objects / 8 MiB of
+source JSON. Config reads and listings are still performed; there is no second
+authoritative database. To refresh a future chart, request from the last known
+`checkedDate` inclusively rather than rereading all history. Filters start listing
+one partition day earlier to cover UTC/Warsaw midnight boundaries and stop after
+the requested end partition; partitions are expected to use UTC or Warsaw dates
+corresponding to their run timestamp. Concurrent backfills into earlier keys can
+require a fresh traversal; this is not a transactionally frozen S3 listing.
+
+Two observation workers are allowed. The caller times out after 25 seconds, and
+workers check a 20-second work budget between SDK operations. A running SDK call
+may outlive the caller timeout, but it retains its worker slot until completion;
+new work is rejected as busy instead of queued without bound. SDK timeouts and
+retry limits remain bounded by the configured client. Unknown checks return 404,
+invalid parameters/cursors 400, malformed data or S3 access denial/missing listed
+objects 502, and temporary storage, busy or timeout errors 503. Partial failures
+fail the page rather than returning a misleading partial success or empty history.
+
+## Home Assistant read-only integration
+
+On add-on startup, the bundled integration is installed into
+`/config/custom_components/flight_price_tracker`. The add-on now mounts HA config
+for that purpose. It manages only its own named files and marker. An existing
+unmarked directory or symlink is refused rather than overwritten; the admin panel
+can still run if integration installation fails. Unrelated files are retained.
+
+When you choose to install this version, start the add-on, then add this top-level
+entry to your existing HA `configuration.yaml` and restart **Home Assistant Core**
+once. The add-on does not edit YAML or restart HA for you:
+
+```yaml
+flight_price_tracker:
+```
+
+This registers two read-only, response-returning services/actions:
+
+- `flight_price_tracker.get_checks`: optional `include_disabled` boolean, default
+  true. Returns schema version and known check metadata fields; compatible private
+  extension fields are not exposed through this dashboard interface.
+- `flight_price_tracker.get_observations`: `check_id`, optional page size, cursor
+  and inclusive checked-date filters described above. Disabled-check history remains
+  available regardless of the list display filter.
+
+For an initial manual check in HA Developer Tools → Actions:
+
+```yaml
+action: flight_price_tracker.get_observations
+data:
+  check_id: example-check
+  page_size: 100
+```
+
+Replace the synthetic ID with one of your checks. Later dashboard code can use
+`hass.callWS` with `type: "call_service"`, the domain/service/data, and
+`return_response: true`; no Ingress URL or AWS key belongs in a card. The services
+require an authenticated active user and intentionally do not require administrator
+rights. Calls without a user context (including unowned automation calls) are
+rejected. No create/update/enable/disable services or event operations exist.
+
+The integration passes a correlated request over HA events; the add-on subscribes
+using its internal token and emits a safe result or error. Up to 16 service requests
+can be pending; the bridge limits concurrent dispatches to four. The integration
+waits at most 60 seconds and clears pending state on success, failure, cancellation
+or timeout. Disconnected HA transport reconnects with bounded backoff. A bridge or
+S3 failure raises an HA action error; it never masquerades as an empty chart.
+
+HA-facing tests use focused Core doubles, real voluptuous schemas, and a local
+WebSocket/HTTP server. They cover non-admin reads and absence of mutations without
+requiring a real HA instance. Actual Core loading and tablet access remain an
+operational test for when you next update HA; you can skip installing 0.3.1 first.
+This stage supplies data services only, not a Lovelace chart card.
 
 ## Local verification
 
