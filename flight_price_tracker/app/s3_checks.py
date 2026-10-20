@@ -7,7 +7,7 @@ import boto3
 from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
 
-from .contracts import ContractError, decode_json, encode_json, validate_checks, validate_new_check
+from .contracts import ContractError, decode_json, encode_json, validate_check_edit, validate_checks, validate_new_check
 from .settings import Settings
 
 CHECKS_KEY = "config/checks.json"
@@ -82,6 +82,27 @@ class S3Checks:
         if any(item["id"] == check["id"] for item in document["checks"]):
             raise ChecksReadError("duplicate_id", "A check with this ID already exists. Choose another ID.", 409)
         document["checks"].append(check)
+        return check, self._put(document, expected_etag)
+
+    async def update(self, check_id: str, payload: dict, expected_etag: str) -> tuple[dict, str]:
+        if not valid_etag(expected_etag):
+            raise ChecksReadError("invalid_request", "A single strong ETag is required.", 400)
+        try:
+            changes = validate_check_edit(payload)
+        except ContractError as exc:
+            raise ChecksReadError("invalid_request", str(exc), 400) from None
+        return await asyncio.to_thread(self._update, check_id, changes, expected_etag)
+
+    def _update(self, check_id: str, changes: dict, expected_etag: str) -> tuple[dict, str]:
+        document = self._current(expected_etag)
+        check = next((item for item in document["checks"] if item["id"] == check_id), None)
+        if check is None:
+            raise ChecksReadError("check_not_found", "Check was not found.", 404)
+        try:
+            validate_check_edit(changes, check)
+        except ContractError as exc:
+            raise ChecksReadError("invalid_request", str(exc), 400) from None
+        check.update(changes)
         return check, self._put(document, expected_etag)
 
     def _set_enabled(self, check_id: str, enabled: bool, expected_etag: str) -> tuple[dict, str]:

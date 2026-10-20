@@ -12,7 +12,7 @@ def event(operation='get_checks', parameters=None):
             'data': {'request_id': 'a' * 32, 'operation': operation, 'parameters': parameters or {}}}
 
 
-@pytest.mark.parametrize('operation', ['create', 'set_enabled', 'delete', 'put_object', 'get_object'])
+@pytest.mark.parametrize('operation', ['create', 'update', 'set_enabled', 'delete', 'put_object', 'get_object'])
 async def test_event_bridge_never_dispatches_writes_or_generic_s3(operation):
     reader = AsyncMock()
     response = await HomeAssistantBridge(reader).dispatch(event(operation, {'enabled': False}))

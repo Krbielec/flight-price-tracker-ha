@@ -6,6 +6,7 @@ from pathlib import Path
 from aiohttp import web
 
 from .authorization import AuthorizationError, HAAdminAuthorizer
+from .collection import CollectionError
 from .contracts import decode_json, encode_json
 from .s3_checks import ChecksReadError, S3Checks, valid_etag
 
@@ -22,7 +23,7 @@ async def ingress_only(request: web.Request, handler):
     return await handler(request)
 
 
-def create_app(store: S3Checks, authorizer: HAAdminAuthorizer | None = None, observations=None) -> web.Application:
+def create_app(store: S3Checks, authorizer: HAAdminAuthorizer | None = None, observations=None, collector=None) -> web.Application:
     authorizer = authorizer if authorizer is not None else HAAdminAuthorizer()
 
     @web.middleware
@@ -69,8 +70,21 @@ def create_app(store: S3Checks, authorizer: HAAdminAuthorizer | None = None, obs
     async def create_check(request):
         body, etag = await mutation_body(request)
         check, new_etag = await store.create(body, etag)
+        collection_status = "disabled" if not check["enabled"] else "unavailable"
+        if check["enabled"] and collector is not None:
+            try:
+                await collector.enqueue(check["id"])
+                collection_status = "queued"
+            except CollectionError as exc:
+                collection_status = exc.code
+                LOG.warning("Check created; initial collection not confirmed (%s)", exc.code)
+            except Exception:
+                # The config is already saved. Do not turn this into a failed creation.
+                collection_status = "lambda_unconfirmed"
+                LOG.error("Check created; unexpected initial collection failure")
         return web.json_response(check, status=201, dumps=encode_json,
-                                 headers={"Cache-Control": "no-store", "ETag": new_etag})
+                                 headers={"Cache-Control": "no-store", "ETag": new_etag,
+                                          "X-Collection-Status": collection_status})
 
     async def set_enabled(request):
         body, etag = await mutation_body(request)
@@ -78,6 +92,12 @@ def create_app(store: S3Checks, authorizer: HAAdminAuthorizer | None = None, obs
             raise ChecksReadError("invalid_request", "Expected only a boolean enabled field.", 400)
         check, new_etag = await store.set_enabled(request.match_info["check_id"], body["enabled"], etag)
         return web.json_response(check, dumps=encode_json, headers={"Cache-Control": "no-store", "ETag": new_etag})
+
+    async def update_check(request):
+        body, etag = await mutation_body(request)
+        check, new_etag = await store.update(request.match_info["check_id"], body, etag)
+        return web.json_response(check, dumps=encode_json,
+                                 headers={"Cache-Control": "no-store", "ETag": new_etag})
 
     async def read_observations(request):
         if observations is None:
@@ -92,6 +112,8 @@ def create_app(store: S3Checks, authorizer: HAAdminAuthorizer | None = None, obs
         return web.json_response(payload, dumps=encode_json, headers={"Cache-Control": "no-store"})
 
     async def cleanup(_app):
+        if collector is not None:
+            await collector.close()
         if observations is not None:
             await observations.close()
         await store.close()
@@ -102,6 +124,7 @@ def create_app(store: S3Checks, authorizer: HAAdminAuthorizer | None = None, obs
     app.router.add_get("/api/checks", checks)
     app.router.add_get("/api/checks/{check_id}/observations", read_observations)
     app.router.add_post("/api/checks", create_check)
+    app.router.add_put("/api/checks/{check_id}", update_check)
     app.router.add_patch("/api/checks/{check_id}/enabled", set_enabled)
     app.on_cleanup.append(cleanup)
     return app

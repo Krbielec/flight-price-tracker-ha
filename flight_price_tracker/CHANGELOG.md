@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.6.0
+
+- Queue the collector Lambda for a new enabled check only after the conditional S3
+  config write succeeds, passing only checkId; disabled checks, edits and toggles
+  do not request collection.
+- Report queue acceptance separately from successful creation, preserving the
+  created check on invoke failure. Bound SDK calls and do not retry invocation.
+- Add collector_function_name and document the additional exact-function IAM
+  permission required in the private infrastructure repository.
+- Test Lambda calls using botocore stubs and verify creation/trigger boundaries
+  and browser feedback, without contacting live AWS.
+
+- Add admin-only editing of departure dates and enabled state; keep ID, route and
+  currency immutable and preserve all historical observations and unknown fields.
+- Require the editor's original ETag and a conditional S3 write; reject stale or
+  concurrent changes without silently rebasing a draft after list refresh.
+- Retain form values after errors, provide explicit reload/cancel, and lock all
+  mutation controls during saves. Editing does not depend on the airport catalogue.
+- Validate changed dates against the Warsaw date and 730-day/366-date limits while
+  allowing unchanged historical endpoints and existing legacy IDs.
+- Add mocked-S3/authorization/validation tests and an offline Chromium admin test.
+- Existing HA configuration and Lovelace resources require no changes.
+
 ## 0.5.1
 
 - Fit the Y axis to visible available fares with padded bounds, including constant

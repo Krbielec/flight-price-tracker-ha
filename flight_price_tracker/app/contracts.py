@@ -85,10 +85,31 @@ MAX_NEW_CHECK_RANGE_DAYS = 366
 NEW_CHECK_FIELDS = {
     "id", "origin", "destination", "departureDateFrom", "departureDateTo", "currency", "enabled",
 }
+EDIT_CHECK_FIELDS = {"departureDateFrom", "departureDateTo", "enabled"}
 
 
 def current_date() -> date:
     return datetime.now(ZoneInfo("Europe/Warsaw")).date()
+
+
+def validate_check_edit(payload: Any, existing: dict | None = None, *, today: date | None = None) -> dict:
+    """Only dates and enabled may change; preserve historical endpoints if unchanged."""
+    if not isinstance(payload, dict) or set(payload) != EDIT_CHECK_FIELDS:
+        raise ContractError("Expected only departureDateFrom, departureDateTo and enabled.")
+    # Reuse calendar/date/boolean validation without imposing new-ID syntax on old checks.
+    candidate = {"id": "edit", "origin": "AAA", "destination": "BBB", "currency": "PLN", **payload}
+    validate_checks({"schemaVersion": 1, "checks": [candidate]})
+    if existing is not None:
+        today = today if today is not None else current_date()
+        changed = [key for key in ("departureDateFrom", "departureDateTo") if payload[key] != existing[key]]
+        for key in changed:
+            value = date.fromisoformat(payload[key])
+            if value < today or value > today + timedelta(days=MAX_NEW_CHECK_DAYS_AHEAD):
+                raise ContractError("Changed dates must be between today and 730 days ahead (Europe/Warsaw).")
+        start, end = (date.fromisoformat(payload[key]) for key in ("departureDateFrom", "departureDateTo"))
+        if changed and (end - start).days + 1 > MAX_NEW_CHECK_RANGE_DAYS:
+            raise ContractError("An edited date range may cover at most 366 departure dates, inclusive.")
+    return dict(payload)
 
 
 def validate_new_check(payload: Any, *, today: date | None = None) -> dict:

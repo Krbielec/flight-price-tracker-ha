@@ -1,7 +1,7 @@
 name: Flight Price Tracker
 slug: flight_price_tracker
 description: Add and enable or disable S3 flight checks through Home Assistant Ingress
-version: 0.5.1
+version: 0.6.0
 url: https://github.com/Krbielec/flight-price-tracker-ha
 image: ghcr.io/krbielec/flight-price-tracker
 startup: application
@@ -21,11 +21,13 @@ map:
     read_only: false
     path: /config
 options:
+  collector_function_name: flight-price-tracker-collector
   aws_region: eu-central-1
   s3_bucket: ""
   aws_access_key_id: ""
   aws_secret_access_key: ""
 schema:
+  collector_function_name: str
   aws_region: str
   s3_bucket: str
   aws_access_key_id: password

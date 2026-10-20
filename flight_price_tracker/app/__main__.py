@@ -8,6 +8,7 @@ from aiohttp import web
 from botocore.exceptions import BotoCoreError
 
 from .admin import create_app
+from .collection import LambdaCollector
 from .s3_checks import S3Checks
 from .observations import ReadFacade, S3Observations
 from .ha_bridge import HomeAssistantBridge
@@ -18,9 +19,9 @@ LOG = logging.getLogger(__name__)
 OPTIONS_PATH = Path("/data/options.json")
 
 
-def create_runtime_app(store):
+def create_runtime_app(store, collector=None):
     observations = S3Observations(store)
-    app = create_app(store, observations=observations)
+    app = create_app(store, observations=observations, collector=collector)
     bridge_task = None
 
     async def start_bridge(_app):
@@ -53,15 +54,16 @@ def main() -> None:
     try:
         settings = Settings.load(OPTIONS_PATH)
         store = S3Checks.from_settings(settings)
+        collector = LambdaCollector.from_settings(settings)
     except SettingsError as exc:
         LOG.error("%s", exc)
         raise SystemExit(1) from None
     except (BotoCoreError, ValueError):
-        LOG.error("Could not initialize the S3 client. Check add-on options.")
+        LOG.error("Could not initialize AWS clients. Check add-on options.")
         raise SystemExit(1) from None
     # aiohttp manages SIGTERM/SIGINT, server shutdown and cleanup callbacks.
     # Disable access logs to avoid recording Ingress URLs/headers.
-    web.run_app(create_runtime_app(store), host="0.0.0.0", port=8099, access_log=None, print=None)
+    web.run_app(create_runtime_app(store, collector), host="0.0.0.0", port=8099, access_log=None, print=None)
 
 
 if __name__ == "__main__":

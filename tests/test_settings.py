@@ -56,3 +56,22 @@ def test_invalid_region_or_bucket(tmp_path, options, key, value):
     path.write_text(json.dumps(options))
     with pytest.raises(SettingsError):
         Settings.load(path)
+
+
+@pytest.mark.parametrize('name', [None, '', ' ', 'a' * 65, 'arn:aws:lambda:region:account:function:x', 'https://private.invalid'])
+def test_invalid_collector_name_is_sanitized(tmp_path, options, name):
+    options['collector_function_name'] = name
+    path = tmp_path / 'options.json'
+    path.write_text(json.dumps(options))
+    with pytest.raises(SettingsError) as error:
+        Settings.load(path)
+    assert 'private.invalid' not in str(error.value)
+
+
+def test_collector_name_default_and_override(tmp_path, options):
+    path = tmp_path / 'options.json'
+    path.write_text(json.dumps(options))
+    assert Settings.load(path).collector_function_name == 'flight-price-tracker-collector'
+    options['collector_function_name'] = 'example-collector'
+    path.write_text(json.dumps(options))
+    assert Settings.load(path).collector_function_name == 'example-collector'

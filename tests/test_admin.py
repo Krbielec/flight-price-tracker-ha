@@ -68,8 +68,7 @@ async def test_failure_is_not_empty_list(ingress_client, store, code, status, ca
     assert code in caplog.text
 
 
-@pytest.mark.parametrize("method,path", [("put", "/api/checks/example"),
-                                          ("delete", "/api/checks/example")])
+@pytest.mark.parametrize("method,path", [("delete", "/api/checks/example")])
 async def test_writes_not_available(ingress_client, store, method, path):
     response = await getattr(ingress_client, method)(path, json={"enabled": False})
     assert response.status in (404, 405)

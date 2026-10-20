@@ -25,6 +25,7 @@ Read `README.md` and `docs/requirements.md` before changing code. `docs/requirem
 - The Home Assistant Ingress administration panel is admin-only (`panel_admin: true`). All create/update/enable/disable operations are reachable exclusively through an authenticated, server-validated administrator path; do not rely solely on hiding sidebar links or client-side checks.
 - Non-admin HA dashboard viewers, including tablet users, can read flight charts without access to the Ingress admin panel. Follow the Calendar add-on's response-returning HA service/event bridge pattern, carefully separating read-only services from mutations.
 - The HA IAM user can `GetObject`/`PutObject` only `config/checks.json`, can `GetObject` `observations/*`, and can list only the `observations/` prefix. No object deletion, modification of observations, `raw/*`, or Terraform state.
+- Initial collection after creating a new enabled check may use `lambda:InvokeFunction` on exactly the configured collector function, server-side only. Persist first, pass only `checkId`, and report enqueue failure separately from successful creation. IAM changes belong to the private infrastructure repository.
 - Persist configuration in S3, **not** a second authoritative HA database. Ensure updates do not silently overwrite concurrent changes or unknown check fields.
 
 ## Data and UI invariants

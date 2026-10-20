@@ -30,6 +30,7 @@ def test_main_starts_ingress_server(monkeypatch):
     settings = Settings("eu-central-1", "example-flight-checks", "fake-test-key", "fake-test-secret")
     store = Mock()
     run_app = Mock()
+    monkeypatch.setattr(entry.LambdaCollector, "from_settings", Mock())
     monkeypatch.setattr(entry.Settings, "load", Mock(return_value=settings))
     monkeypatch.setattr(entry.S3Checks, "from_settings", Mock(return_value=store))
     monkeypatch.setattr(entry.web, "run_app", run_app)

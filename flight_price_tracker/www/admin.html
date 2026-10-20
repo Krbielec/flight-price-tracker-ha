@@ -29,13 +29,15 @@
 </head>
 <body>
   <h1>Flight Price Tracker</h1>
-  <p>Add, enable or disable monitoring checks stored in S3. Disabling preserves all historical observations.</p>
+  <p>Add, edit, enable or disable monitoring checks stored in S3. Changes preserve all historical observations.</p>
   <button id="refresh" type="button">Refresh</button>
   <p id="status" role="status" aria-live="polite">Loading…</p>
   <details id="create-section">
     <summary>Add check</summary>
     <p class="hint">Use a unique, permanent ID. Dates are inclusive, from today up to 730 days ahead
       in Europe/Warsaw, covering at most 366 departure dates.</p>
+    <p class="hint">Saving a new enabled check requests an initial price collection for that check.
+      Results appear after AWS finishes processing. Disabled checks do not start collection.</p>
     <p id="airport-status" class="hint" role="status" aria-live="polite">Loading airport list…</p>
     <form id="create-form">
       <fieldset id="create-fields" disabled>
@@ -59,6 +61,25 @@
       </fieldset>
     </form>
   </details>
+  <section id="edit-section" hidden aria-labelledby="edit-heading">
+    <h2 id="edit-heading">Edit check</h2>
+    <p id="edit-identity"></p>
+    <p class="hint">ID, route and currency are permanent. Changed dates must be from today up to
+      730 days ahead (Europe/Warsaw); an edited range may cover at most 366 days.
+      Unchanged historical dates are allowed. Existing observations stay on the chart.</p>
+    <form id="edit-form">
+      <fieldset id="edit-fields" disabled>
+        <legend>Dates and collection</legend>
+        <label>Departure from<input name="departureDateFrom" type="date" required></label>
+        <label>Departure to<input name="departureDateTo" type="date" required></label>
+        <label><span>Collect prices</span><span><input name="enabled" type="checkbox"> Enabled</span></label>
+        <button type="submit">Save changes</button>
+      </fieldset>
+    </form>
+    <button id="edit-reload" type="button" disabled>Reload values</button>
+    <button id="edit-cancel" type="button">Cancel editing</button>
+    <p class="hint">After a conflict, Refresh the list, then Reload values to discard your draft and load the latest check.</p>
+  </section>
   <div class="table-wrap">
     <table aria-label="Monitoring checks">
       <thead><tr>
@@ -84,6 +105,14 @@
     const createFields = document.querySelector('#create-fields');
     const airportStatus = document.querySelector('#airport-status');
     const sortButtons = document.querySelectorAll('[data-sort]');
+    const editSection = document.querySelector('#edit-section');
+    const editForm = document.querySelector('#edit-form');
+    const editFields = document.querySelector('#edit-fields');
+    const editReload = document.querySelector('#edit-reload');
+    const editCancel = document.querySelector('#edit-cancel');
+    let editingId = null;
+    let editEtag = null;
+    let saving = false;
     let etag = null;
     let checks = [];
     let airports = [];
@@ -94,11 +123,17 @@
     let sortDirection = 'ascending';
 
     function updateFormState() {
-      createFields.disabled = !etag || !catalogReady;
+      createFields.disabled = !etag || !catalogReady || saving;
+      editFields.disabled = !etag || !editingId || saving;
+      editReload.disabled = !etag || !editingId || saving;
+      editCancel.disabled = saving;
     }
     function lockActions() {
       for (const action of tbody.querySelectorAll('button')) action.disabled = true;
       createFields.disabled = true;
+      editFields.disabled = true;
+      editReload.disabled = true;
+      editCancel.disabled = saving;
     }
     function renderChecks() {
       tbody.replaceChildren();
@@ -113,10 +148,16 @@
         action.type = 'button';
         action.textContent = check.enabled ? 'Disable' : 'Enable';
         action.className = check.enabled ? 'state-disable' : 'state-enable';
-        action.disabled = !etag;
+        action.disabled = !etag || saving;
         action.setAttribute('aria-label', `${action.textContent} ${check.id}`);
         action.addEventListener('click', () => toggle(check));
-        row.insertCell().append(action);
+        const edit = document.createElement('button');
+        edit.type = 'button';
+        edit.textContent = 'Edit';
+        edit.disabled = !etag || saving;
+        edit.setAttribute('aria-label', `Edit ${check.id}`);
+        edit.addEventListener('click', () => openEditor(check));
+        row.insertCell().append(edit, ' ', action);
       }
     }
     function updateSortHeaders() {
@@ -184,9 +225,10 @@
         updateFormState();
       }
     }
-    async function mutate(path, method, payload, message, confirmed = () => {}) {
+    async function mutate(path, method, payload, message, confirmed = () => {}, expectedVersion = etag) {
       if (!etag) return;
-      const expected = etag;
+      const expected = expectedVersion;
+      saving = true;
       etag = null;
       button.disabled = true;
       lockActions();
@@ -199,12 +241,14 @@
         });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error?.message || 'Could not confirm the update.');
-        confirmed();
-        await load(message);
+        const confirmedMessage = confirmed(data, response) || message;
+        await load(confirmedMessage);
       } catch (error) {
         status.textContent = `${error.message} Refresh before trying again.`;
       } finally {
+        saving = false;
         button.disabled = false;
+        renderChecks();
         updateFormState();
       }
     }
@@ -237,6 +281,39 @@
       await mutate(`api/checks/${encodeURIComponent(check.id)}/enabled`, 'PATCH',
         {enabled: !check.enabled}, 'Check updated.');
     }
+    function openEditor(check) {
+      if (!etag || saving) return;
+      // Keep the original draft version across Refresh: never silently rebase unsaved edits.
+      editingId = check.id;
+      editEtag = etag;
+      editSection.hidden = false;
+      document.querySelector('#edit-identity').textContent =
+        `${check.id} · ${airportLabel(check.origin, airportByCode)} → ${airportLabel(check.destination, airportByCode)} · ${check.currency}`;
+      for (const name of ['departureDateFrom', 'departureDateTo']) editForm.elements[name].value = check[name];
+      editForm.elements.enabled.checked = check.enabled;
+      updateFormState();
+      editForm.elements.departureDateFrom.focus();
+    }
+    function closeEditor() {
+      editingId = null;
+      editEtag = null;
+      editSection.hidden = true;
+      editForm.reset();
+    }
+    editCancel.addEventListener('click', closeEditor);
+    editReload.addEventListener('click', () => {
+      const check = checks.find((item) => item.id === editingId);
+      if (check) openEditor(check);
+      else status.textContent = 'This check is no longer available. Cancel editing and refresh.';
+    });
+    editForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      if (!etag || !editEtag || !editingId || editFields.disabled) return;
+      const payload = {enabled: editForm.elements.enabled.checked};
+      for (const name of ['departureDateFrom', 'departureDateTo']) payload[name] = editForm.elements[name].value;
+      await mutate(`api/checks/${encodeURIComponent(editingId)}`, 'PUT', payload,
+        'Check updated.', closeEditor, editEtag);
+    });
     createForm.addEventListener('submit', async (event) => {
       event.preventDefault();
       if (!etag || createFields.disabled) return;
@@ -246,9 +323,14 @@
         payload[name] = fields.get(name).trim().toUpperCase();
       }
       for (const name of ['departureDateFrom', 'departureDateTo']) payload[name] = fields.get(name);
-      await mutate('api/checks', 'POST', payload, 'Check added.', () => {
+      await mutate('api/checks', 'POST', payload, 'Check added.', (_data, response) => {
         createForm.reset();
         for (const field of ['origin', 'destination']) populateAirports(field);
+        const collection = response.headers.get('X-Collection-Status');
+        if (collection === 'queued') return 'Check added. Initial collection queued; prices will appear after processing.';
+        if (collection === 'disabled') return 'Check added disabled; no initial collection requested.';
+        if (collection === 'lambda_access_denied') return 'Check added, but initial collection was denied. Configure lambda:InvokeFunction permission; scheduled collection remains available.';
+        return 'Check added, but initial collection could not be confirmed. Do not create this check again; scheduled collection remains available.';
       });
     });
     button.addEventListener('click', () => { load(); loadAirports(); });

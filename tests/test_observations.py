@@ -322,3 +322,15 @@ def test_observation_route_and_departure_window_are_validated(observation, field
     observation[field] = value
     with pytest.raises(ChecksReadError):
         normalize_observation(observation, 'example-check')
+
+
+async def test_narrowing_check_window_preserves_history_outside_current_window(reader, s3_client, document, observation):
+    document['checks'][0].update(departureDateFrom='2027-02-14', departureDateTo='2027-02-15', enabled=False)
+    with Stubber(s3_client) as stub:
+        config(stub, document)
+        listing(stub, [KEY])
+        stub.add_response('get_object', response(observation), {'Bucket': BUCKET, 'Key': KEY})
+        result = await reader.page('example-check')
+        assert result['observations'][0]['departureDate'] == '2027-02-19'
+        assert result['observations'][0]['price'] == 196.5
+        stub.assert_no_pending_responses()

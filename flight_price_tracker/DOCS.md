@@ -1,8 +1,8 @@
 # Flight Price Tracker — first test in Home Assistant
 
-Version 0.5.1 displays S3 checks and lets administrators add, enable or disable
-them. It also provides read-only HA services for observation history. Editing existing
-check definitions remains a later step. A dynamic Lovelace chart card is included.
+Version 0.6.0 lets administrators create checks, edit departure dates and enabled
+state, and enable/disable collection. ID, route and currency remain fixed. It also
+provides read-only HA services and a dynamic Lovelace chart card.
 
 1. Add `https://github.com/Krbielec/flight-price-tracker-ha` under **Settings →
    Apps → App store → ⋮ → Repositories** (called **Add-ons / Add-on store** in
@@ -52,7 +52,8 @@ To test creation, open **Add check** and use a unique lowercase ID, distinct
 airports from the dropdowns, valid future departure dates, and currency (PLN is the
 tested default). You can uncheck **Enabled** to save a check without scheduling
 future collection for it. Add it, refresh, and verify the new row and all previous
-rows remain. Adding a check does not run the collector immediately.
+rows remain. A new enabled check requests an initial collection after saving; a disabled check
+does not. Wait for the collector to finish and the dashboard to refresh.
 
 New dates may range from today through 730 days ahead in Europe/Warsaw. A check
 can cover at most 366 departure dates, inclusive. Historical checks remain readable
@@ -115,7 +116,7 @@ No AWS credentials belong in dashboard configuration. The native Lovelace card w
 
 ## Add the dynamic chart card
 
-Start version 0.5.1 to install `/config/www/flight-price-tracker/`. If HA's `www`
+Start the add-on to install `/config/www/flight-price-tracker/`. If HA's `www`
 directory was just created for the first time, restart HA Core once to enable
 `/local/` files. The integration above must already be enabled.
 
@@ -163,3 +164,57 @@ or mixed-currency failure shows an error instead of a truncated/mixed chart.
 Card files are managed only in their dedicated directory; an existing unmanaged
 directory is refused. Dashboard resources and YAML are not edited automatically.
 For later upgrades, change the resource URL's version and reload the browser.
+
+
+## Edit check dates and collection state
+
+From 0.5.1, update/start the add-on and reopen its Ingress panel. No Core restart,
+configuration.yaml edit or Lovelace resource/YAML change is needed for this upgrade.
+
+Click **Edit** beside a check. Change **Departure from**, **Departure to** and/or
+**Enabled**, then **Save changes**. ID, route and currency are shown as fixed text;
+a different route or currency needs a new check. Existing observations remain
+available in the chart, including flight dates removed from the current window.
+Edits affect subsequent scheduled collection; creating a new enabled check also
+requests an initial collection, as described below.
+
+Changed dates must be today through 730 days ahead (Europe/Warsaw), inclusive, and
+a changed range may cover at most 366 days. An unchanged endpoint may stay in the
+past; unchanged historical windows can still have their enabled state changed.
+
+Test a check you intend to modify: save a date range, Refresh, and confirm the new
+values and prior observations remain. Try two tabs: open Edit in both, save in
+one, then try to save the stale editor. It must report a conflict. Refresh does
+not silently rebase the draft; **Reload values** explicitly discards it and loads
+the current values/version. Failed requests retain inputs. If a response was lost,
+inspect the refreshed values before trying again because the write may have succeeded.
+**Cancel editing** closes the form without writing. Other mutation buttons are
+locked while saving. Confirm that a non-admin still cannot open or use this panel.
+
+
+## Enable initial collection after creating a check
+
+The collector already supports a `checkId` event. In add-on options, verify
+`collector_function_name` (default `flight-price-tracker-collector`) matches the
+function in the configured AWS region/account. Existing options without this field
+use the default; no new AWS key is required.
+
+In the private AWS infrastructure repository, extend the HA IAM user's policy with
+`lambda:InvokeFunction` on **that one function ARN**, keeping all S3 restrictions.
+See the policy template in the repository README. This permission change needs
+separate deployment by the infrastructure owner; installing the add-on does not
+change AWS permissions. No Lambda/collector code change is needed for the inspected
+`checkId` contract. No AWS deployment or paid invocation is performed by tests.
+
+Create one enabled check: the panel should say **Initial collection queued**.
+This confirms AWS accepted the request, not that collection finished. Observations
+appear after processing and the next card refresh. If permission is missing, the
+check is still saved and the panel reports that collection was denied. Fix IAM;
+do not create the check again. The next daily scheduled run still processes active
+checks. There is no manual recheck/retry action in this version.
+
+A disabled new check does not request initial collection. Editing, enabling an
+existing check, stale/duplicate creation requests and failed S3 writes never request
+collection. An invoke failure does not roll back the check, and the add-on does
+not automatically retry the invoke. Lost replies/process interruptions can leave
+collection uncertain; the config write and Lambda request are not one transaction.

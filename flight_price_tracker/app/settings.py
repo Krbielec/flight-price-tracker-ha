@@ -16,6 +16,7 @@ class Settings:
     s3_bucket: str
     aws_access_key_id: str = field(repr=False)
     aws_secret_access_key: str = field(repr=False)
+    collector_function_name: str = "flight-price-tracker-collector"
 
     @classmethod
     def load(cls, path: Path) -> "Settings":
@@ -37,4 +38,8 @@ class Settings:
             or re.fullmatch(r"\d+\.\d+\.\d+\.\d+", bucket)
         ):
             raise SettingsError("Invalid S3 bucket name.")
-        return cls(**{key: options[key] for key in cls.__dataclass_fields__})
+        function = options.get("collector_function_name", "flight-price-tracker-collector")
+        if not isinstance(function, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", function):
+            raise SettingsError("Invalid collector function name.")
+        return cls(**{key: options[key] for key in ("aws_region", "s3_bucket", "aws_access_key_id", "aws_secret_access_key")},
+                   collector_function_name=function)

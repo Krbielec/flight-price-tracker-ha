@@ -1,16 +1,18 @@
 # Flight Price Tracker — Home Assistant
 
-Home Assistant add-on for adding, viewing and enabling/disabling flight monitoring
+Home Assistant add-on for adding, editing, viewing and enabling/disabling flight monitoring
 checks stored in S3. Daily Ryanair fare collection runs separately in AWS.
 
 ## Current scope
 
-Version 0.5.1 adds one dynamic Lovelace card: one chart panel per check, with
-separate series per flight departure date. It refreshes the check list automatically
-and reads observations through the existing response-returning HA services, including
-for non-admin viewers. The Ingress panel supports creating checks, enabling/disabling,
-sorting and airport selection. Editing existing definitions remains a later milestone.
-Native Lovelace rendering was selected with the user; Grafana remains a future option.
+Version 0.6.0 adds administrator editing of departure-date ranges and enabled state,
+and queues an initial Lambda collection after creating a new enabled check.
+ID, route and currency stay fixed to keep each check's observation history coherent.
+The Ingress panel also supports creation, sorting and airport selection. The dynamic
+Lovelace card renders one chart per check, with automatic discovery, per-departure-date
+series, dynamic axes and departure times in the legend. Authenticated non-admins
+read charts through HA services. Native Lovelace rendering was selected with the
+user; Grafana remains a future option.
 
 The private `flight-price-tracker-aws` repository owns infrastructure and collector
 code. This public repository must never contain AWS credentials, private
@@ -29,6 +31,7 @@ in Home Assistant's add-on configuration UI:
 | --- | --- |
 | `aws_region` | AWS region; defaults to `eu-central-1` |
 | `s3_bucket` | Your existing data bucket name; required |
+| `collector_function_name` | Collector Lambda name in the same region/account; defaults to `flight-price-tracker-collector` |
 | `aws_access_key_id` | Dedicated IAM user's key ID; required |
 | `aws_secret_access_key` | Dedicated IAM user's secret key; required |
 
@@ -40,7 +43,9 @@ logs. This stage uses explicit IAM key options, not ambient AWS profiles.
 AWS calls run only on the server. This version needs `s3:GetObject` and
 `s3:PutObject` on the single `config/checks.json` object. Observation reads also
 require `s3:GetObject` on `observations/*` and `s3:ListBucket` restricted to prefixes
-under `observations/`. No access to raw collector data or Terraform state is needed.
+under `observations/`. Initial collection additionally needs `lambda:InvokeFunction`
+on exactly the configured collector function ARN. No access to raw collector data
+or Terraform state is needed.
 No AWS deployment or IAM changes are performed by the add-on. It never writes or deletes observations and
 does not create a local config database.
 
@@ -108,8 +113,7 @@ observations. It cannot cancel a collector run already in progress.
 `GET /api/checks` now includes the S3 configuration's strong `ETag` response header.
 `PATCH /api/checks/{id}/enabled` requires `Content-Type: application/json`, that
 exact ETag in `If-Match`, and a body containing only `{"enabled":false}` or
-`{"enabled":true}`. Success returns the updated check and a new ETag. No other
-fields can be changed through this endpoint.
+`{"enabled":true}`. Success returns the updated check and a new ETag. Date-range editing uses the separate administrator PUT endpoint below.
 
 The backend rereads the full document, validates it, checks the supplied version,
 changes only `enabled` for the matching ID, and calls `PutObject` with S3 `IfMatch`.
@@ -132,7 +136,9 @@ destination IATA codes, inclusive departure-date range, currency (defaults to
 such as **Valencia - VLC**, while only the IATA code is submitted to S3. Currency
 input is normalized to uppercase. New checks default to enabled through the API when
 `enabled` is omitted. An enabled check participates in the next scheduled collector
-run; creating it does not trigger collection immediately.
+run. After the conditional S3 write succeeds, creating a new enabled check also
+requests an asynchronous initial collection for that check only. A new disabled
+check is saved without requesting collection.
 
 `POST /api/checks` accepts a single check object with the same required fields as
 the read example (`enabled` is optional). It requires an active HA administrator,
@@ -162,6 +168,108 @@ All mutation controls are locked during save. Form values survive failed saves;
 after an error, refresh and verify the table before trying again. In particular,
 a lost response may mean creation succeeded, and reusing its ID must not create
 a duplicate. The form resets only after a confirmed successful response.
+
+## Initial collection after creation
+
+The add-on invokes the configured collector **server-side**, using the same dedicated
+AWS credentials and region. The only payload is `{"checkId":"new-check"}` and
+`InvocationType` is `Event`. The existing private collector accepts this contract
+and loads the active check from S3. The configured function must read the same
+bucket/config/checks.json as this add-on. No collector/Lambda/Terraform source belongs in
+this public repository. Never configure the browser or a dashboard to invoke AWS.
+
+The IAM policy in the private AWS repository needs an additional statement for
+the HA IAM user. Replace REGION and ACCOUNT_ID with the deployment values:
+
+```json
+{
+  "Effect": "Allow",
+  "Action": "lambda:InvokeFunction",
+  "Resource": "arn:aws:lambda:REGION:ACCOUNT_ID:function:flight-price-tracker-collector"
+}
+```
+
+Use the ARN of `collector_function_name` if different. Keep all existing S3
+restrictions and grant no wildcard function access, Lambda management permissions
+or new AWS credentials. Manage this policy in the private infrastructure repository;
+the add-on does not apply IAM changes or deploy AWS resources. Without this policy
+change, check creation succeeds but the initial collection is denied and the panel
+shows a warning. The existing daily schedule remains the fallback for active checks.
+
+The creation response still returns the created check with HTTP 201 and its ETag.
+An additional `X-Collection-Status` header reports `queued`, `disabled`, or a safe
+failure code (`lambda_access_denied`, `lambda_not_found`, `lambda_throttled`,
+`lambda_unconfirmed`; `unavailable` if no collector is wired). The browser displays
+this separately from successful persistence. AWS 202 means **queued, not completed**;
+results appear after the Lambda finishes and the card refreshes. See
+[AWS asynchronous invocation](https://docs.aws.amazon.com/lambda/latest/dg/invocation-async.html).
+
+A creation validation error, stale ETag, duplicate ID or failed S3 write never
+invokes the collector. Edits, enabling an existing check and ordinary reads also
+never invoke it. The function target is configured server-side, not accepted from
+an HTTP body, URL or HA read service. A failed invoke never rolls back or retries
+creation; the UI resets the successfully saved form and warns about collection.
+Do not create the same check again to retry the invocation.
+
+The SDK has 5/10-second connect/read timeouts and one invoke attempt (no SDK retry).
+The panel waits only for queue acceptance, not for collection. Network failure can
+leave acceptance uncertain, and a process crash after S3 persistence can prevent
+invocation. There is no transactional outbox or exactly-once guarantee. Lambda's
+own async delivery/retries may produce multiple snapshots; the card already selects
+the latest daily observation deterministically. Reliable retry/outbox and a manual
+recheck action are separate future work.
+
+## Edit an existing check
+
+Choose **Edit** in the Ingress table. Only inclusive departure dates and collection
+state are editable. ID, origin, destination and currency are fixed; use a new check
+for a different route or currency. Historical observations are neither rewritten
+nor removed, even when they fall outside a narrowed current date window. The chart
+keeps those historical series. Changes affect subsequent scheduled collection;
+they do not start or cancel a collector run.
+
+`PUT /api/checks/{id}` accepts exactly these fields, all required:
+
+```json
+{
+  "departureDateFrom": "2027-02-14",
+  "departureDateTo": "2027-02-24",
+  "enabled": true
+}
+```
+
+This is the editable projection of a check, not full-document replacement.
+Supplying ID, route, currency or extension fields is rejected, even unchanged.
+The server rereads and validates the full S3 document, finds the existing ID and
+merges only the three editable fields. Unknown fields (including precise extension
+numbers), other checks and check order remain unchanged. Missing IDs return 404;
+invalid edits return 400. Unreadable/unsupported configuration is never replaced.
+
+Every changed date must fall between today and 730 days ahead in Europe/Warsaw.
+A changed window may cover at most 366 departure dates, inclusive. An endpoint
+that is unchanged may remain in the past, allowing an ongoing window to be extended
+without removing past days. Unchanged historical windows remain editable for
+collection state, and existing IDs do not have to satisfy the newer creation slug
+rules. Reversed/impossible dates and non-boolean enabled values are rejected.
+
+The same live HA administrator verification, JSON-only body, strong `If-Match`
+header and conditional S3 `PutObject` apply as for creation. Success returns 200,
+the updated check and a new ETag. A stale editor or concurrent S3 writer returns
+409; there are no unconditional writes or automatic write retries.
+
+The editor captures the version when opened. Refreshing the list does not rebase
+an open draft onto a newer configuration. After a conflict/error, values remain
+in the editor and mutations stay locked until **Refresh**. Use **Reload values**
+to explicitly discard the draft and load current values/version before editing
+again, or **Cancel editing** to close without saving. If the write response was
+lost, inspect the refreshed values because S3 may already have accepted it.
+Creation, editing and enable/disable controls are locked during every save,
+including after sorting the table. Editing works even if the airport catalogue
+is temporarily unavailable. No mutation service is added to the HA read-only bridge.
+
+For an upgrade from 0.5.1, update/start the add-on and reopen its admin panel. No
+`configuration.yaml`, Lovelace YAML, resource URL change or Core restart is needed;
+the chart assets and read-only integration behavior are unchanged in this release.
 
 ## Administration table and airport selection
 
@@ -321,7 +429,7 @@ The Lovelace card below uses these services without Ingress access.
 
 ## Dynamic Lovelace card
 
-After updating to 0.5.1 and starting the add-on, the managed card assets are copied
+On add-on startup, the managed card assets are copied
 into `/config/www/flight-price-tracker/`. Existing unmanaged directories or symlinks
 are refused; other files in `www` are preserved. Nothing edits your dashboards or
 registers resources automatically. If this is the first time HA's `www` directory
@@ -388,11 +496,14 @@ Offline browser verification (optional locally; runs in CI on amd64):
 .venv/bin/python -m pip install -r requirements-browser.txt
 .venv/bin/python -m playwright install chromium
 .venv/bin/python tests/browser_card_smoke.py
+.venv/bin/python tests/browser_admin_smoke.py
 ```
 
-The Chromium test uses a mobile viewport and synthetic HA responses. It exercises
+The Chromium card test uses a mobile viewport and synthetic HA responses. It covers
 six-to-seven automatic panels, touch/keyboard details, series toggles, disabled
-checks, incremental reads, errors and lifecycle cleanup. Real HA/tablet installation
+checks, incremental reads, errors and lifecycle cleanup. The admin test covers edit
+conflicts, draft versions, locking, validation and lost write responses using
+synthetic configuration and ETags. Real HA/tablet installation
 and non-admin dashboard use still need an operational smoke test. For updates,
 increment the resource URL version and reload the browser to replace cached JS.
 
