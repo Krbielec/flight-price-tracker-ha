@@ -110,6 +110,18 @@ test('missing prices and missing observation days break lines rather than drawin
   assert.doesNotMatch(chartMarkup(check, [day('19')], new Set(['2027-02-19'])), /<circle/);
 });
 
+test('each visible line offers a keyboard-accessible series selection target', () => {
+  const rows = [fare(), fare({checkedAt: '2026-10-20T10:00:00+00:00', checkedDate: '2026-10-20'}),
+    fare({departureDate: '2027-02-20'}),
+    fare({checkedAt: '2026-10-20T10:00:00+00:00', checkedDate: '2026-10-20', departureDate: '2027-02-20'})];
+  const all = chartMarkup(check, rows);
+  assert.equal((all.match(/data-line=/g) || []).length, 2);
+  assert.match(all, /data-line="2027-02-19" role="button" tabindex="0"/);
+  const selected = chartMarkup(check, rows, new Set(['2027-02-20']), '2027-02-19');
+  assert.equal((selected.match(/data-line=/g) || []).length, 1);
+  assert.match(selected, /stroke-width="4"/);
+});
+
 test('point details preserve local timestamps, next-day arrival and currency; markup escapes text', () => {
   assert.match(pointDetail(fare()), /2027-02-20 02:15:00/);
   assert.match(pointDetail(fare()), /196.00 PLN/);
@@ -157,9 +169,10 @@ test('legend shows latest departure wall-clock time without converting timezone 
   const {legendLabel} = await import('../flight_price_tracker/www/flight-chart.mjs');
   const old = fare({departureAt: '2027-02-19T08:35:00'});
   const latest = fare({checkedAt: '2026-10-20T10:00:00+00:00', checkedDate: '2026-10-20', departureAt: '2027-02-19T09:40:00'});
-  assert.equal(legendLabel('2027-02-19', [latest, old]), '2027-02-19 09:40');
-  assert.match(chartMarkup(check, [old]), />2027-02-19 08:35<\/button>/);
-  assert.equal(legendLabel('2027-02-19', [old, {...latest, departureAt: null, unavailable: true}]), '2027-02-19 —');
+  assert.equal(legendLabel('2027-02-19', [latest, old]), '2027-02-19 pt 09:40');
+  assert.match(chartMarkup(check, [old]), />2027-02-19 pt 08:35<\/button>/);
+  assert.equal(legendLabel('2027-02-19', [old, {...latest, departureAt: null, unavailable: true}]), '2027-02-19 pt —');
+  assert.equal(legendLabel('2027-02-20', [fare({departureDate: '2027-02-20', departureAt: '2027-02-20T09:15:00'})]), '2027-02-20 sb 09:15');
   const tied = {...latest, departureAt: '2027-02-19T10:50:00'};
   assert.equal(legendLabel('2027-02-19', [latest, tied]), legendLabel('2027-02-19', [tied, latest]));
 });

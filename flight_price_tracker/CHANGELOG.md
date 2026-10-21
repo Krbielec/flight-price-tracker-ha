@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.2
+
+- Keep each chart heading on one line, with bold route and regular date range,
+  check ID and disabled state. Make the plot, text and spacing more compact.
+- Add Polish weekday abbreviations to legend dates.
+- Let touch, mouse and keyboard users select a line to show only its departure
+  series; selecting it again restores the prior legend visibility.
+
 ## 0.6.1
 
 - Accept `currency: null` on unavailable or sold-out S3 fares while retaining a

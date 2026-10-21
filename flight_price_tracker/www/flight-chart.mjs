@@ -101,10 +101,11 @@ export function legendLabel(date, rows) {
     !old || runKey(row) > runKey(old) || runKey(row) === runKey(old) && tieKey(row) > tieKey(old) ? row : old, null);
   // Slice the local wall-clock time directly, without timezone conversion.
   const time = latest?.departureAt?.match(/T(\d{2}:\d{2}):/);
-  return `${date} ${time ? time[1] : '—'}`;
+  const weekday = ['nd', 'pn', 'wt', 'śr', 'cz', 'pt', 'sb'][new Date(`${date}T00:00:00Z`).getUTCDay()];
+  return `${date} ${weekday} ${time ? time[1] : '—'}`;
 }
 
-export function chartMarkup(check, rows, hidden = new Set()) {
+export function chartMarkup(check, rows, hidden = new Set(), selected = null) {
   if (!rows.length) return '<p class="muted">Brak obserwacji dla tego checka.</p>';
   const dates = [...new Set(rows.map((r) => r.departureDate))].sort();
   const days = rows.map((r) => dayNumber(r.checkedDate));
@@ -114,24 +115,28 @@ export function chartMarkup(check, rows, hidden = new Set()) {
   const width = Math.max(700, (last - first) * 80 + 100);
   const plotWidth = width - 90;
   const x = (r) => 60 + (last === first ? plotWidth / 2 : (dayNumber(r.checkedDate) - first) / (last - first) * plotWidth);
-  const y = (r) => 225 - (r.price - minimum) / (maximum - minimum) * 195;
-  let svg = `<svg viewBox="0 0 ${width} 365" style="min-width:${Math.max(480, (last - first) * 64 + 100)}px" role="group" aria-label="Historia cen ${escapeHTML(check.id)}">`;
+  const y = (r) => 170 - (r.price - minimum) / (maximum - minimum) * 148;
+  let svg = `<svg viewBox="0 0 ${width} 295" style="min-width:${Math.max(480, (last - first) * 64 + 100)}px" role="group" aria-label="Historia cen ${escapeHTML(check.id)}">`;
   for (let i = 0; i <= 4; i++) {
-    const py = 225 - i * 195 / 4;
+    const py = 170 - i * 148 / 4;
     svg += `<path d="M60 ${py}H${width - 30}" class="grid"/><text x="52" y="${py + 4}" text-anchor="end">${Number((minimum + (maximum - minimum) * i / 4).toFixed(2))}</text>`;
   }
   svg += `<text x="60" y="16">${escapeHTML(check.currency)}</text>`;
   for (const date of [...new Set(rows.map((r) => r.checkedDate))].sort()) {
     const px = x({checkedDate: date});
-    svg += `<path d="M${px} 225v8" class="grid"/><text class="axis-day" data-observation-date="${date}" x="${px}" y="250" transform="rotate(-55 ${px} 250)" text-anchor="end">${date}</text>`;
+    svg += `<path d="M${px} 170v8" class="grid"/><text class="axis-day" data-observation-date="${date}" x="${px}" y="195" transform="rotate(-55 ${px} 195)" text-anchor="end">${date}</text>`;
   }
-  svg += `<text x="${60 + plotWidth / 2}" y="350" text-anchor="middle">Data obserwacji (Europe/Warsaw)</text>`;
+  svg += `<text x="${60 + plotWidth / 2}" y="288" text-anchor="middle">Data obserwacji (Europe/Warsaw)</text>`;
   dates.forEach((date, index) => {
     if (hidden.has(date)) return;
     const series = rows.map((row, rowIndex) => ({row, rowIndex})).filter(({row}) => row.departureDate === date);
     let segment = [], previousDay = null;
     const flush = () => {
-      if (segment.length > 1) svg += `<polyline fill="none" stroke="${color(index)}" stroke-width="2" points="${segment.join(' ')}"/>`;
+      if (segment.length > 1) {
+        const points = segment.join(' ');
+        svg += `<polyline fill="none" stroke="${color(index)}" stroke-width="${selected === date ? 4 : 2}" points="${points}"/>`;
+        svg += `<polyline class="line-hit" fill="none" stroke="transparent" stroke-width="18" points="${points}" data-line="${date}" role="button" tabindex="0" aria-label="Pokaż tylko serię ${date}"/>`;
+      }
       segment = [];
     };
     for (const {row, rowIndex} of series) {
@@ -141,16 +146,16 @@ export function chartMarkup(check, rows, hidden = new Set()) {
       if (available) segment.push(`${x(row)},${y(row)}`);
       previousDay = day;
       // Unknown prices sit on the baseline as hollow marks, with status in details.
-      const cy = available ? y(row) : 225;
+      const cy = available ? y(row) : 170;
       const label = escapeHTML(pointDetail(row));
-      svg += `<circle cx="${x(row)}" cy="${cy}" r="5" fill="${available ? color(index) : 'var(--card-background-color, white)'}" stroke="${color(index)}" stroke-width="2" tabindex="0" role="button" data-point="${rowIndex}" aria-label="${label}"><title>${label}</title></circle>`;
+      svg += `<circle cx="${x(row)}" cy="${cy}" r="${selected === date ? 6 : 5}" fill="${available ? color(index) : 'var(--card-background-color, white)'}" stroke="${color(index)}" stroke-width="2" tabindex="0" role="button" data-point="${rowIndex}" aria-label="${label}"><title>${label}</title></circle>`;
     }
     flush();
   });
   svg += '</svg>';
   const legend = dates.map((date, i) => `<button class="series" data-series="${date}" aria-pressed="${!hidden.has(date)}" style="border-color:${color(i)}" title="Godzina wylotu z najnowszej obserwacji (czas lokalny lotniska)">${escapeHTML(legendLabel(date, rows))}</button>`).join('');
   const unavailable = rows.some((r) => r.soldOut || r.unavailable || r.price === null);
-  return `<div class="plot">${svg}</div>${unavailable ? '<p class="muted">Puste kółko na osi oznacza brak dostępnej ceny, nie cenę 0.</p>' : ''}<div class="legend" aria-label="Daty wylotu — przełącz widoczność">${legend}</div>`;
+  return `<div class="plot">${svg}</div>${unavailable ? '<p class="plot-note">○ = brak ceny (nie 0).</p>' : ''}<div class="legend" aria-label="Daty wylotu — przełącz widoczność">${legend}</div>`;
 }
 
 export class TrackerModel {

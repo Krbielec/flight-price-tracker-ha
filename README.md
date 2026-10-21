@@ -5,10 +5,12 @@ checks stored in S3. Daily Ryanair fare collection runs separately in AWS.
 
 ## Current scope
 
-Version 0.6.1 accepts null currency on unavailable fares from the collector, so
-their S3 snapshots load as chart gaps. Version 0.6.0 added administrator editing
-of departure-date ranges and enabled state,
-and queues an initial Lambda collection after creating a new enabled check.
+Version 0.6.2 compacts chart panels, labels legend dates with weekdays and lets
+viewers isolate a departure series by selecting its line. Version 0.6.1 accepts
+null currency on unavailable fares from the collector, so their S3 snapshots load
+as chart gaps. Version 0.6.0 added administrator editing of departure-date ranges
+and enabled state, and queued an initial Lambda collection after creating a new
+enabled check.
 ID, route and currency stay fixed to keep each check's observation history coherent.
 The Ingress panel also supports creation, sorting and airport selection. The dynamic
 Lovelace card renders one chart per check, with automatic discovery, per-departure-date
@@ -443,10 +445,10 @@ Enable the HA integration as described above. In **Settings → Dashboards → R
 (enable Advanced Mode if necessary), add this **JavaScript module** once:
 
 ```text
-/local/flight-price-tracker/flight-price-tracker-card.js?v=0.6.1
+/local/flight-price-tracker/flight-price-tracker-card.js?v=0.6.2
 ```
 
-For an existing card, update the resource URL to `v=0.6.1` after starting the
+For an existing card, update the resource URL to `v=0.6.2` after starting the
 updated add-on, then reload the dashboard. No Home Assistant Core restart is
 needed when the integration and `/local/` resource are already installed.
 
@@ -476,9 +478,12 @@ rounded bounds, rather than always starting at zero (190–550 gives 160–580).
 Hiding a series recalculates the scale; constant/zero fares and no available fares
 also have a non-degenerate scale. Y is the price in the check's currency.
 Each flight departure date is a separate colored series. Legend buttons toggle
-series locally and display the departure date plus local HH:MM from that series'
-newest observation. If the newest observation has no departure time, the legend
-shows an em dash rather than an older time. Full point details remain historical. Tap, hover or focus a point to see exact local departure/arrival
+series locally and display the departure date, Polish weekday abbreviation and
+local HH:MM from that series' newest observation. If the newest observation has
+no departure time, the legend shows an em dash rather than an older time.
+Selecting a line by touch, mouse or keyboard hides the other series; selecting
+it again restores the previous legend visibility. Full point details remain
+historical. Tap, hover or focus a point to see exact local departure/arrival
 strings (including next-day arrival), fare/status and UTC collection timestamp.
 Unavailable/sold-out prices are hollow status markers at the baseline, **not zero
 fares**, and interrupt the line. Days without observations also interrupt lines.

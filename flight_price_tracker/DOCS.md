@@ -1,9 +1,10 @@
 # Flight Price Tracker — first test in Home Assistant
 
-Version 0.6.1 lets administrators create checks, edit departure dates and enabled
+Version 0.6.2 lets administrators create checks, edit departure dates and enabled
 state, and enable/disable collection. ID, route and currency remain fixed. It also
 provides read-only HA services and a dynamic Lovelace chart card. It also reads
-unavailable fares with null currency as chart gaps.
+unavailable fares with null currency as chart gaps. Chart headings and spacing are
+more compact, legend dates show weekdays, and selecting a line isolates its series.
 
 1. Add `https://github.com/Krbielec/flight-price-tracker-ha` under **Settings →
    Apps → App store → ⋮ → Repositories** (called **Add-ons / Add-on store** in
@@ -124,10 +125,10 @@ directory was just created for the first time, restart HA Core once to enable
 In **Settings → Dashboards → Resources**, add a **JavaScript module**:
 
 ```text
-/local/flight-price-tracker/flight-price-tracker-card.js?v=0.6.1
+/local/flight-price-tracker/flight-price-tracker-card.js?v=0.6.2
 ```
 
-For an existing card, update the resource URL to `v=0.6.1` after starting the
+For an existing card, update the resource URL to `v=0.6.2` after starting the
 updated add-on, then reload the dashboard. If the integration and `/local/`
 resource already work, Home Assistant Core does not need a restart.
 
@@ -148,7 +149,9 @@ locally. No viewer operation changes S3 configuration.
 
 Tap a point for fare, local departure and arrival times, including next-day dates.
 Legend buttons hide/show individual departure-date series and display the local
-departure time from the latest observation, for example `2027-02-14 08:35`.
+departure time from the latest observation, for example `2027-02-19 pt 05:45`.
+Selecting a chart line by touch, mouse or keyboard hides the other series;
+selecting it again restores the previous legend visibility.
 An unknown time in the latest observation is shown as an em dash.
 The Y axis fits visible available prices with padding instead of always starting
 at zero. For example, prices 190–550 produce bounds 160–580. Each observation day

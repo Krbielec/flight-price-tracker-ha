@@ -1,4 +1,4 @@
-import {TrackerModel, chartMarkup, escapeHTML, pointDetail} from './flight-chart.mjs?v=0.6.1';
+import {TrackerModel, chartMarkup, escapeHTML, pointDetail} from './flight-chart.mjs?v=0.6.2';
 
 class FlightPriceTrackerCard extends HTMLElement {
   constructor() {
@@ -6,6 +6,7 @@ class FlightPriceTrackerCard extends HTMLElement {
     this.attachShadow({mode: 'open'});
     this._model = new TrackerModel();
     this._hidden = new Map();
+    this._solo = new Map();
     this._generation = 0;
     this._busy = false;
     this._visibility = () => {
@@ -16,9 +17,11 @@ class FlightPriceTrackerCard extends HTMLElement {
     this.shadowRoot.addEventListener('focusin', (event) => this._point(event.target));
     this.shadowRoot.addEventListener('pointerover', (event) => this._point(event.target));
     this.shadowRoot.addEventListener('keydown', (event) => {
-      if (['Enter', ' '].includes(event.key) && event.target.hasAttribute('data-point')) {
+      if (['Enter', ' '].includes(event.key) &&
+          (event.target.hasAttribute('data-point') || event.target.hasAttribute('data-line'))) {
         event.preventDefault();
-        this._point(event.target);
+        if (event.target.hasAttribute('data-line')) this._interact(event);
+        else this._point(event.target);
       }
     });
   }
@@ -82,7 +85,7 @@ class FlightPriceTrackerCard extends HTMLElement {
   }
 
   _interact(event) {
-    const target = event.target.closest?.('button, [data-point]');
+    const target = event.target.closest?.('button, [data-point], [data-line]');
     if (!target) {
       // A tablet user can tap near a point instead of hitting a tiny SVG circle.
       const svg = event.target.closest?.('svg');
@@ -90,7 +93,7 @@ class FlightPriceTrackerCard extends HTMLElement {
         const rect = svg.getBoundingClientRect();
         const x = (event.clientX - rect.left) / rect.width * svg.viewBox.baseVal.width;
         const y = (event.clientY - rect.top) / rect.height * svg.viewBox.baseVal.height;
-        if (y < 10 || y > 245 || x < 30 || x > svg.viewBox.baseVal.width - 5) return;
+        if (y < 10 || y > 180 || x < 30 || x > svg.viewBox.baseVal.width - 5) return;
         let nearest, distance = Infinity;
         for (const point of svg.querySelectorAll('[data-point]')) {
           const next = Math.hypot(point.cx.baseVal.value - x, point.cy.baseVal.value - y);
@@ -105,8 +108,23 @@ class FlightPriceTrackerCard extends HTMLElement {
       this._showDisabled = !this._showDisabled;
       this._stop();
       this._refresh();
+    } else if (target.dataset.line) {
+      const id = target.closest('section').dataset.check;
+      const date = target.dataset.line;
+      const solo = this._solo.get(id);
+      if (solo?.date === date) {
+        this._hidden.set(id, solo.previousHidden);
+        this._solo.delete(id);
+      } else {
+        const rows = this._model.history.get(id)?.rows || [];
+        const dates = new Set(rows.map((row) => row.departureDate));
+        this._solo.set(id, {date, previousHidden: solo?.previousHidden || new Set(this._hidden.get(id) || [])});
+        this._hidden.set(id, new Set([...dates].filter((other) => other !== date)));
+      }
+      this._render();
     } else if (target.dataset.series) {
       const id = target.closest('section').dataset.check;
+      this._solo.delete(id);
       const hidden = this._hidden.get(id) || new Set();
       if (hidden.has(target.dataset.series)) hidden.delete(target.dataset.series);
       else hidden.add(target.dataset.series);
@@ -126,36 +144,39 @@ class FlightPriceTrackerCard extends HTMLElement {
     if (!this._config) return;
     const focused = this.shadowRoot.activeElement;
     const sectionId = focused?.closest('section')?.dataset.check;
-    const focusKey = ['action', 'series', 'point'].find((key) => focused?.dataset[key] !== undefined);
+    const focusKey = ['action', 'series', 'point', 'line'].find((key) => focused?.dataset[key] !== undefined);
     const focusValue = focusKey && focused.dataset[focusKey];
     const esc = escapeHTML, model = this._model;
     const panels = model.checks.filter((c) => this._showDisabled || c.enabled).map((check) => {
       const entry = model.history.get(check.id);
       return `<section data-check="${esc(check.id)}">
-        <h3>${esc(check.origin)} → ${esc(check.destination)} ${check.enabled ? '' : '· Wyłączony'}</h3>
-        <p class="muted">${esc(check.departureDateFrom)} – ${esc(check.departureDateTo)} · ${esc(check.id)}</p>
+        <div class="check-heading"><strong>${esc(check.origin)} → ${esc(check.destination)}</strong><span>${esc(check.departureDateFrom)} – ${esc(check.departureDateTo)} · ${esc(check.id)}${check.enabled ? '' : ' · Wyłączony'}</span></div>
         ${model.errors.has(check.id) ? '<p role="alert">Nie udało się odczytać historii. Poprzednie dane mogą być nieaktualne. Użyj Odśwież, aby ponowić.</p>' : ''}
-        ${entry ? chartMarkup(check, entry.rows, this._hidden.get(check.id)) : '<p class="muted">Oczekiwanie na dane…</p>'}
-        <p class="detail" aria-live="polite">Dotknij punktu, najedź kursorem lub wybierz go klawiaturą, aby zobaczyć szczegóły lotu.</p>
+        ${entry ? chartMarkup(check, entry.rows, this._hidden.get(check.id), this._solo.get(check.id)?.date) : '<p class="muted">Oczekiwanie na dane…</p>'}
+        <p class="detail" aria-live="polite">Dotknij punktu, aby zobaczyć szczegóły lotu.</p>
       </section>`;
     }).join('');
     this.shadowRoot.innerHTML = `<style>
-      :host { display:block; color:var(--primary-text-color, #202124); font-family:var(--ha-font-family-body, system-ui, sans-serif); }
-      ha-card { display:block; padding:16px; }
-      header { display:flex; flex-wrap:wrap; align-items:center; gap:10px; }
-      h2 { flex:1; margin:0; font-size:1.3em; } h3 { margin:0; font-size:1.15em; }
+      :host { display:block; color:var(--primary-text-color, #202124); font-family:var(--ha-font-family-body, system-ui, sans-serif); font-size:clamp(12px, 1vw + 10px, 15px); }
+      ha-card { display:block; padding:12px; }
+      header { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+      h2 { flex:1; margin:0; font-size:1.2em; }
       button { min-height:44px; border:1px solid var(--divider-color, #d4d8de); border-radius:8px;
-        padding:8px 12px; background:var(--secondary-background-color, #f3f4f6); color:var(--primary-text-color, #202124); font:inherit; cursor:pointer; }
+        padding:6px 10px; background:var(--secondary-background-color, #f3f4f6); color:var(--primary-text-color, #202124); font:inherit; cursor:pointer; }
       button:disabled { opacity:.6; cursor:wait; }
-      button:focus-visible, circle:focus-visible { outline:3px solid var(--primary-color); outline-offset:2px; }
-      section { margin-top:20px; border-top:1px solid var(--divider-color); padding-top:20px; min-width:0; }
+      button:focus-visible, circle:focus-visible, .line-hit:focus-visible { outline:3px solid var(--primary-color); outline-offset:2px; }
+      section { margin-top:12px; border-top:1px solid var(--divider-color); padding-top:12px; min-width:0; }
+      .check-heading { display:flex; align-items:baseline; gap:8px; white-space:nowrap; overflow-x:auto; padding-bottom:2px; }
+      .check-heading span { color:var(--secondary-text-color); font-size:.86em; }
       p { overflow-wrap:anywhere; } .muted, .detail { color:var(--secondary-text-color); font-size:.85em; }
-      .detail { min-height:3em; line-height:1.5; } [role=alert] { color:var(--error-color, #b3261e); }
+      .detail { min-height:1.3em; line-height:1.35; margin:6px 0 0; } [role=alert] { color:var(--error-color, #b3261e); }
       .plot { overflow-x:auto; } svg { display:block; width:100%; min-width:480px; }
-      svg .axis-day { font-size:16px; }
-      svg text { fill:var(--secondary-text-color, #60656f); font-size:18px; } .grid { stroke:var(--divider-color, #aaa); stroke-width:1; }
-      circle { cursor:pointer; } .legend { display:flex; flex-wrap:wrap; gap:6px; max-height:150px; overflow:auto; }
-      .series { font-size:.8em; border-width:2px; } .series[aria-pressed=false] { opacity:.5; text-decoration:line-through; }
+      svg .axis-day { font-size:13px; }
+      svg text { fill:var(--secondary-text-color, #60656f); font-size:14px; } .grid { stroke:var(--divider-color, #aaa); stroke-width:1; }
+      circle, .line-hit { cursor:pointer; } .line-hit { pointer-events:stroke; }
+      .plot-note { margin:3px 0 5px; color:var(--secondary-text-color); font-size:.78em; }
+      .legend { display:flex; flex-wrap:wrap; gap:4px; max-height:126px; overflow:auto; }
+      .series { font-size:.78em; border-width:2px; min-height:38px; padding:4px 7px; } .series[aria-pressed=false] { opacity:.5; text-decoration:line-through; }
     </style><ha-card>
       <header><h2>${esc(this._config.title || 'Ceny lotów')}</h2>
       <button data-action="refresh" ${this._busy ? 'disabled' : ''}>${this._busy ? 'Ładowanie…' : 'Odśwież'}</button>

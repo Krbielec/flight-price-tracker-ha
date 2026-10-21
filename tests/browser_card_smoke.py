@@ -60,6 +60,10 @@ async def main():
         }''')
         await page.wait_for_function("card.shadowRoot.querySelectorAll('circle').length === 12 && !card._busy")
         assert await page.locator('flight-price-tracker-card section').count() == 6
+        heading = page.locator('flight-price-tracker-card section').first.locator('.check-heading')
+        assert await heading.locator('strong').inner_text() == 'KRK → VLC'
+        assert '2027-02-19 – 2027-02-21 · check-0' in await heading.inner_text()
+        assert await heading.evaluate('(node) => node.scrollHeight <= node.clientHeight + 2')
         await page.locator('flight-price-tracker-card circle').first.tap()
         assert '2027-02-20 02:15:00' in await page.locator('flight-price-tracker-card .detail').first.inner_text()
         assert '196.00 PLN' in await page.locator('flight-price-tracker-card .detail').first.inner_text()
@@ -111,7 +115,7 @@ async def main():
         }''')
         await page.wait_for_function("card.shadowRoot.querySelectorAll('section')[0].querySelectorAll('.axis-day').length === 4 && !card._busy")
         panel = page.locator('flight-price-tracker-card section').first
-        assert await panel.locator('[data-series="2027-02-19"]').inner_text() == '2027-02-19 08:35'
+        assert await panel.locator('[data-series="2027-02-19"]').inner_text() == '2027-02-19 pt 08:35'
         assert '160' in await panel.locator('svg').text_content()
         assert '580' in await panel.locator('svg').text_content()
         assert await panel.locator('.plot').evaluate('(plot) => plot.scrollWidth > plot.clientWidth')
@@ -122,6 +126,32 @@ async def main():
         box = await latest_point.bounding_box()
         await page.mouse.click(box['x'] + box['width'] / 2 + 8, box['y'] + box['height'] / 2)
         assert '240.00 PLN' in await panel.locator('.detail').inner_text()
+        # Selecting a line hides other departure series; selecting it again restores visibility.
+        await page.evaluate('''() => {
+          window.historyRows = ['2026-10-19', '2026-10-20'].flatMap((date) => [
+            {checkedAt: `${date}T11:00:00+00:00`, checkedDate: date,
+             departureDate: '2027-02-19', departureAt: '2027-02-19T08:35:00',
+             arrivalAt: '2027-02-19T12:15:00', price: 190, currency: 'PLN', soldOut: false, unavailable: false},
+            {checkedAt: `${date}T11:00:00+00:00`, checkedDate: date,
+             departureDate: '2027-02-20', departureAt: '2027-02-20T09:15:00',
+             arrivalAt: '2027-02-20T12:30:00', price: 240, currency: 'PLN', soldOut: false, unavailable: false},
+          ]);
+          window.nextPoll();
+        }''')
+        await page.wait_for_function("card.shadowRoot.querySelectorAll('section')[0].querySelectorAll('[data-line]').length === 2 && !card._busy")
+        panel = page.locator('flight-price-tracker-card section').first
+        line = panel.locator('[data-line="2027-02-19"]')
+        await line.tap()
+        assert await panel.locator('[data-line]').count() == 1
+        assert await panel.locator('[data-series="2027-02-20"]').get_attribute('aria-pressed') == 'false'
+        await panel.locator('[data-line="2027-02-19"]').focus()
+        await panel.locator('[data-line="2027-02-19"]').press('Enter')
+        assert await panel.locator('[data-line]').count() == 2
+        assert await panel.locator('[data-series="2027-02-20"]').get_attribute('aria-pressed') == 'true'
+        await panel.locator('[data-series="2027-02-20"]').click()
+        await panel.locator('[data-line="2027-02-19"]').click()
+        await panel.locator('[data-line="2027-02-19"]').click()
+        assert await panel.locator('[data-series="2027-02-20"]').get_attribute('aria-pressed') == 'false'
         await panel.screenshot(path='/tmp/flight-price-tracker-card-axes.png')
         await page.evaluate('card.remove()')
         assert await page.evaluate('card._timer === null')
