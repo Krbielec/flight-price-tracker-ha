@@ -99,14 +99,17 @@ def normalize_observation(document, check_id):
             seen.add(departure)
             missing = fare["sold_out"] or fare["unavailable"]
             # All v1 keys must be present, including nullable unavailable values.
-            if not {"departure_at", "arrival_at", "price"} <= fare.keys():
+            if not {"departure_at", "arrival_at", "price", "currency"} <= fare.keys():
                 raise ValueError
             departure_time = _flight_time(fare["departure_at"], missing)
             _flight_time(fare["arrival_at"], missing)
             if departure_time is not None and departure_time.date() != departure:
                 raise ValueError
             currency = fare.get("currency")
-            if not isinstance(currency, str) or not re.fullmatch(r"[A-Z]{3}", currency):
+            if currency is None:
+                if not missing:
+                    raise ValueError
+            elif not isinstance(currency, str) or not re.fullmatch(r"[A-Z]{3}", currency):
                 raise ValueError
             amount = fare["price"]
             if amount is not None and (type(amount) not in (int, float, Decimal) or not math.isfinite(float(amount)) or amount < 0):

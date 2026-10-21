@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.1
+
+- Accept `currency: null` on unavailable or sold-out S3 fares while retaining a
+  required currency field and strict currency validation for available fares.
+- Allow the Lovelace card to display those rows as unavailable gaps without
+  treating them as zero prices or mixing currencies for available fares.
+- Cover the S3 read path and card handling with synthetic observations.
+
 ## 0.6.0
 
 - Queue the collector Lambda for a new enabled check only after the conditional S3

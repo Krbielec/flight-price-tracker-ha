@@ -1,8 +1,9 @@
 # Flight Price Tracker — first test in Home Assistant
 
-Version 0.6.0 lets administrators create checks, edit departure dates and enabled
+Version 0.6.1 lets administrators create checks, edit departure dates and enabled
 state, and enable/disable collection. ID, route and currency remain fixed. It also
-provides read-only HA services and a dynamic Lovelace chart card.
+provides read-only HA services and a dynamic Lovelace chart card. It also reads
+unavailable fares with null currency as chart gaps.
 
 1. Add `https://github.com/Krbielec/flight-price-tracker-ha` under **Settings →
    Apps → App store → ⋮ → Repositories** (called **Add-ons / Add-on store** in
@@ -123,8 +124,12 @@ directory was just created for the first time, restart HA Core once to enable
 In **Settings → Dashboards → Resources**, add a **JavaScript module**:
 
 ```text
-/local/flight-price-tracker/flight-price-tracker-card.js?v=0.5.1
+/local/flight-price-tracker/flight-price-tracker-card.js?v=0.6.1
 ```
+
+For an existing card, update the resource URL to `v=0.6.1` after starting the
+updated add-on, then reload the dashboard. If the integration and `/local/`
+resource already work, Home Assistant Core does not need a restart.
 
 Add one manual card to the existing dashboard:
 

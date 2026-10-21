@@ -50,7 +50,7 @@ async def main():
               departureDate: '2027-02-19', departureAt: '2027-02-19T23:45:00', arrivalAt: '2027-02-20T02:15:00',
               price: 196, currency: 'PLN', soldOut: false, unavailable: false};
             return {response: {checkId: call.service_data.check_id, observations: window.historyRows || [row,
-              {...row, departureDate: '2027-02-20', price: null, unavailable: true}], nextCursor: null}};
+              {...row, departureDate: '2027-02-20', price: null, currency: null, unavailable: true}], nextCursor: null}};
           }};
           await import('/flight-price-tracker-card.js');
           window.card = document.createElement('flight-price-tracker-card');

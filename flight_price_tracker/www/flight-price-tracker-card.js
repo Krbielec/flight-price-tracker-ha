@@ -1,4 +1,4 @@
-import {TrackerModel, chartMarkup, escapeHTML, pointDetail} from './flight-chart.mjs?v=0.5.1';
+import {TrackerModel, chartMarkup, escapeHTML, pointDetail} from './flight-chart.mjs?v=0.6.1';
 
 class FlightPriceTrackerCard extends HTMLElement {
   constructor() {

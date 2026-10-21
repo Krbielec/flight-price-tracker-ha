@@ -48,7 +48,19 @@ test('failed page, wrong currency and repeated cursors never produce partial suc
     return response([fare()], 'next');
   }}, check));
   await assert.rejects(readHistory({callWS: async () => response([fare({currency: 'EUR'})])}, check));
+  await assert.rejects(readHistory({callWS: async () => response([fare({currency: null})])}, check));
+  await assert.rejects(readHistory({callWS: async () => response([fare({currency: 'EUR', unavailable: true, price: null})])}, check));
   await assert.rejects(readHistory({callWS: async () => response([], 'same')}, check), /Repeated/);
+});
+
+test('null currency on unavailable fare remains a status gap', async () => {
+  const missing = fare({currency: null, price: null, departureAt: null, arrivalAt: null,
+    unavailable: true, departureDate: '2027-02-20'});
+  const result = await readHistory({callWS: async () => response([fare(), missing])}, check);
+  assert.equal(result.rows.length, 2);
+  assert.equal(result.rows[1].currency, null);
+  assert.match(chartMarkup(check, result.rows), /Niedostępny/);
+  assert.match(pointDetail(missing), /Cena: Niedostępny/);
 });
 
 test('cancelled traversal cannot publish late responses', async () => {

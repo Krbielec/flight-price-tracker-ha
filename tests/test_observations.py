@@ -61,14 +61,44 @@ def test_unavailable_fares_are_gaps_not_fake_zeros(observation, flag):
     assert row['departureAt'] is None
 
 
+@pytest.mark.parametrize('flag', ['sold_out', 'unavailable'])
+async def test_s3_page_accepts_null_currency_only_for_missing_fare(reader, s3_client, document, observation, flag):
+    observation['prices'][0].update({flag: True, 'price': None, 'currency': None,
+                                      'departure_at': None, 'arrival_at': None})
+    available = deepcopy(observation['prices'][0])
+    available.update({flag: False, 'departure_date': '2027-02-20', 'departure_at': '2027-02-20T09:00:00',
+                      'arrival_at': '2027-02-20T11:00:00', 'price': 210, 'currency': 'PLN'})
+    observation['prices'].append(available)
+    with Stubber(s3_client) as stub:
+        config(stub, document)
+        listing(stub, [KEY])
+        stub.add_response('get_object', response(observation), {'Bucket': BUCKET, 'Key': KEY})
+        page = await reader.page('example-check')
+        assert len(page['observations']) == 2
+        assert page['observations'][0]['price'] is None
+        assert page['observations'][0]['currency'] is None
+        assert page['observations'][0]['unavailable'] is (flag == 'unavailable')
+        assert page['observations'][1]['price'] == 210
+        assert page['observations'][1]['currency'] == 'PLN'
+        stub.assert_no_pending_responses()
+
+
 @pytest.mark.parametrize('field,value', [('price', -1), ('price', True), ('price', '123'), ('price', None),
     ('departure_at', '2027-02-19T23:45:00Z'), ('departure_at', '2027-02-18T23:45:00'),
-    ('arrival_at', 'not-a-date'), ('sold_out', 0), ('unavailable', None), ('currency', 'pln')])
+    ('arrival_at', 'not-a-date'), ('sold_out', 0), ('unavailable', None), ('currency', 'pln'), ('currency', None)])
 def test_bad_fare_rejects_snapshot(observation, field, value):
     observation['prices'][0][field] = value
     with pytest.raises(ChecksReadError) as error:
         normalize_observation(observation, 'example-check')
     assert error.value.status == 502
+
+
+def test_missing_currency_field_rejects_snapshot_even_if_fare_unavailable(observation):
+    observation['prices'][0].update(unavailable=True, price=None)
+    del observation['prices'][0]['currency']
+    with pytest.raises(ChecksReadError) as error:
+        normalize_observation(observation, 'example-check')
+    assert error.value.code == 'invalid_observation'
 
 
 @pytest.mark.parametrize('field,value', [('schemaVersion', 2), ('schemaVersion', True),

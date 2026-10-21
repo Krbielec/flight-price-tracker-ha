@@ -5,7 +5,9 @@ checks stored in S3. Daily Ryanair fare collection runs separately in AWS.
 
 ## Current scope
 
-Version 0.6.0 adds administrator editing of departure-date ranges and enabled state,
+Version 0.6.1 accepts null currency on unavailable fares from the collector, so
+their S3 snapshots load as chart gaps. Version 0.6.0 added administrator editing
+of departure-date ranges and enabled state,
 and queues an initial Lambda collection after creating a new enabled check.
 ID, route and currency stay fixed to keep each check's observation history coherent.
 The Ingress panel also supports creation, sorting and airport selection. The dynamic
@@ -334,8 +336,10 @@ filters are `YYYY-MM-DD` and do not filter flight departure dates.
 `checkedAt` must be offset-aware UTC in the source; `checkedDate` is derived in
 Europe/Warsaw, including summer/winter offsets. Flight timestamps remain local
 airport wall-clock strings, with no added `Z` or inferred cross-airport conversion.
-Unavailable/sold-out rows have `price: null` and retain their availability flags
-and any known flight times. Available prices must be finite, numeric and nonnegative.
+Unavailable/sold-out rows have `price: null`, may have `currency: null`, and retain
+their availability flags and any known flight times. The currency field remains
+required; available fares require a three-letter currency matching the check.
+Available prices must be finite, numeric and nonnegative.
 A snapshot may have an empty price list. Missing v1 fields, unsupported schemas,
 inconsistent check IDs and duplicate departure dates within a run are errors.
 
@@ -439,8 +443,12 @@ Enable the HA integration as described above. In **Settings → Dashboards → R
 (enable Advanced Mode if necessary), add this **JavaScript module** once:
 
 ```text
-/local/flight-price-tracker/flight-price-tracker-card.js?v=0.5.1
+/local/flight-price-tracker/flight-price-tracker-card.js?v=0.6.1
 ```
+
+For an existing card, update the resource URL to `v=0.6.1` after starting the
+updated add-on, then reload the dashboard. No Home Assistant Core restart is
+needed when the integration and `/local/` resource are already installed.
 
 On the existing tablet dashboard, add one manual card:
 

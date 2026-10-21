@@ -51,7 +51,9 @@ export async function readHistory(hass, check, previous, active = () => true) {
       throw new Error('Invalid observations response');
     }
     for (const row of result.observations) {
-      if (row.currency !== check.currency || !/^\d{4}-\d\d-\d\d$/.test(row.checkedDate) ||
+      const missing = row.soldOut === true || row.unavailable === true;
+      if (!(row.currency === check.currency || missing && row.currency === null) ||
+          !/^\d{4}-\d\d-\d\d$/.test(row.checkedDate) ||
           !/^\d{4}-\d\d-\d\d$/.test(row.departureDate) ||
           typeof row.soldOut !== 'boolean' || typeof row.unavailable !== 'boolean' ||
           !(row.price === null || typeof row.price === 'number' && Number.isFinite(row.price) && row.price >= 0)) {
